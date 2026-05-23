@@ -31,7 +31,7 @@ def chat_history_parser(conversations, music_crs, target_turn_number):
             - user_query: The user query at the target turn
     """
     df_conversation = pd.DataFrame(conversations)
-    df_history = df_conversation[df_conversation['turn_number'] < target_turn_number]
+    df_history = df_conversation[df_conversation['turn_number'] < target_turn_number] # Filters out the "future". It only keeps messages that happened before the target turn.
     chat_history = []
     for turn_data in df_history.to_dict(orient="records"):
         turn_number = turn_data['turn_number']

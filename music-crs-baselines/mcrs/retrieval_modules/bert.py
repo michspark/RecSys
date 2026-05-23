@@ -83,7 +83,7 @@ class BERT_MODEL:
         """
         metadata_dataset = load_dataset(self.dataset_name)
         metadata_concat_dataset = concatenate_datasets([metadata_dataset[split_type] for split_type in self.split_types])
-        metadata_dict = {item["track_id"]: item for item in metadata_concat_dataset}
+        metadata_dict = {item["track_id"]: item for item in metadata_concat_dataset} # track_id을 키로, 전체 메타데이터 딕셔너리를 값으로 하는 딕셔너리 생성
         return metadata_dict
 
     def _stringify_metadata(self, metadata: Dict[str, object]) -> str:
@@ -99,6 +99,11 @@ class BERT_MODEL:
             if isinstance(entity, list):
                 entity = ", ".join(entity)
             metadata_str += f"{corpus_type}: {entity}\n"
+
+        # Returns something like
+        # track_name: Blinding Lights
+        # artist_name: The Weeknd
+        # album_name: After Hours
         return metadata_str
 
     def _mean_pool(self, last_hidden_states: torch.Tensor, attention_mask: torch.Tensor) -> torch.Tensor:
@@ -109,14 +114,14 @@ class BERT_MODEL:
         Returns:
             [batch, hidden] mean-pooled embeddings.
         """
-        mask = attention_mask.unsqueeze(-1).expand(last_hidden_states.size()).float()
-        summed = torch.sum(last_hidden_states * mask, dim=1)
-        counts = torch.clamp(mask.sum(dim=1), min=1e-9)
+        mask = attention_mask.unsqueeze(-1).expand(last_hidden_states.size()).float() # 마스크를 [batch, seq_len] → [batch, seq_len, 768]로 확장. 패딩 토큰의 임베딩을 0으로 만들기 위해.
+        summed = torch.sum(last_hidden_states * mask, dim=1) # 패딩이 아닌 토큰의 임베딩만 합산
+        counts = torch.clamp(mask.sum(dim=1), min=1e-9) # 실제 토큰 수로 나누기 위해 패딩 토큰은 제외. 0으로 나누는 것을 방지하기 위해 작은 값으로 클램프.
         return summed / counts
 
     def build_index(self) -> None:
         """Build and persist an embedding index over the loaded corpus."""
-        track_ids = list(self.metadata_dict.keys())
+        track_ids = list(self.metadata_dict.keys()) # 모든 트랙을 텍스트 문자열로 변환, corpus+texts는 100만개의 문자열 리스트
         corpus_texts = []
         for track_id in track_ids:
             metadata = self.metadata_dict[track_id]

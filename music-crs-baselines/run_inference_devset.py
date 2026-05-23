@@ -125,7 +125,7 @@ if __name__ == "__main__":
     parser.add_argument(
         "--tid",
         type=str,
-        default="llama1b_bm25_testset",
+        default="llama1b_bm25_devset",
         help="Task identifier matching a config file (e.g., 'llama1b_bm25' loads config/llama1b_bm25.yaml)"
     )
     parser.add_argument(
