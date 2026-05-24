@@ -1,5 +1,6 @@
 from .bm25 import BM25_MODEL
 from .bert import BERT_MODEL
+from .bge import BGE_MODEL
 
 def load_retrieval_module(
         retrieval_type: str,
@@ -12,5 +13,7 @@ def load_retrieval_module(
         return BM25_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
     elif retrieval_type == "bert":
         return BERT_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
+    elif retrieval_type == "bge":
+        return BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
     else:
         raise ValueError(f"Unsupported retrieval type: {retrieval_type}")
