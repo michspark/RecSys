@@ -65,7 +65,7 @@ class CRS_BASELINE:
         self.dtype = dtype
         self.attn_implementation = attn_implementation
         self.lm = load_lm_module(self.lm_type, self.device, self.attn_implementation, self.dtype)
-        self.retrieval = load_retrieval_module(self.retrieval_type, self.item_db_name, self.track_split_types, self.corpus_types, self.cache_dir)
+        self.retrieval = load_retrieval_module(self.retrieval_type, self.item_db_name, self.track_split_types, self.corpus_types, self.cache_dir, lm=self.lm)
         self.item_db = MusicCatalogDB(self.item_db_name, self.track_split_types, self.corpus_types)
         self.user_db = UserProfileDB(self.user_db_name, self.user_split_types)
         self.prompts_dir = os.path.join(os.path.dirname(__file__), "system_prompts")
