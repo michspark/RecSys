@@ -11,6 +11,7 @@ from datasets import load_dataset
 from tqdm import tqdm
 from typing import List, Dict, Any, Tuple
 import pandas as pd
+import datetime
 from omegaconf import OmegaConf
 
 def chat_history_parser(conversations, music_crs, target_turn_number):
@@ -81,7 +82,8 @@ def main(args):
         cache_dir=config.cache_dir,
         device=config.device,
         attn_implementation=config.attn_implementation,
-        dtype=torch.bfloat16
+        dtype=torch.bfloat16,
+        keyword_cache_path=getattr(config, "keyword_cache_path", None),
     )
     db = load_dataset(config.test_dataset_name, split="test")
     # Prepare all batch data at once
@@ -115,8 +117,11 @@ def main(args):
                 "predicted_response": result["response"]
             })
     os.makedirs("exp/inference/devset", exist_ok=True)
-    with open(f"exp/inference/devset/{args.tid}.json", "w", encoding="utf-8") as f:
+    timestamp = datetime.datetime.now().strftime("%m%d_%H%M")
+    output_path = f"exp/inference/devset/{args.tid}_{timestamp}.json"
+    with open(output_path, "w", encoding="utf-8") as f:
         json.dump(inference_results, f, ensure_ascii=False)
+    print(f"Saved: {output_path}")
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(

@@ -39,6 +39,7 @@ class CRS_BASELINE:
         device="cuda",
         attn_implementation="eager",
         dtype=torch.bfloat16,
+        keyword_cache_path: str = None,
     ):
         """Initialize the CRS baseline components.
 
@@ -64,8 +65,9 @@ class CRS_BASELINE:
         self.device = device
         self.dtype = dtype
         self.attn_implementation = attn_implementation
+        self.keyword_cache_path = keyword_cache_path
         self.lm = load_lm_module(self.lm_type, self.device, self.attn_implementation, self.dtype)
-        self.retrieval = load_retrieval_module(self.retrieval_type, self.item_db_name, self.track_split_types, self.corpus_types, self.cache_dir, lm=self.lm)
+        self.retrieval = load_retrieval_module(self.retrieval_type, self.item_db_name, self.track_split_types, self.corpus_types, self.cache_dir, lm=self.lm, keyword_cache_path=keyword_cache_path)
         self.item_db = MusicCatalogDB(self.item_db_name, self.track_split_types, self.corpus_types)
         self.user_db = UserProfileDB(self.user_db_name, self.user_split_types)
         self.prompts_dir = os.path.join(os.path.dirname(__file__), "system_prompts")
@@ -120,7 +122,7 @@ class CRS_BASELINE:
         retrieval_input = "\n".join([f"{conversation['role']}: {conversation['content']}" for conversation in self.session_memory]) # formats the entire chat history into a single string for retrieval
         retrieval_items = self.retrieval.text_to_item_retrieval(retrieval_input, topk=20) # Passes this retrieval module to find the top 20 relevent items
         recommend_item = self.item_db.id_to_metadata(retrieval_items[0]) # Takes absolute best match and fetches its full metadata from the item
-        
+
         # stage2. response generation
         response = self.lm.response_generation(system_prompt, self.session_memory, recommend_item)
         return {
@@ -150,6 +152,7 @@ class CRS_BASELINE:
         sys_prompts = []
         retrieval_inputs = []
         session_memories = []
+        user_ids = []
 
         for data in batch_data:
             user_query = data['user_query']
@@ -161,13 +164,14 @@ class CRS_BASELINE:
             retrieval_input = "\n".join([f"{conversation['role']}: {conversation['content']}" for conversation in session_memory])
             retrieval_inputs.append(retrieval_input)
             session_memories.append(session_memory)
+            user_ids.append(user_id)
 
         # Stage 1: Batch retrieval
         if hasattr(self.retrieval, 'batch_text_to_item_retrieval'):
-            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(retrieval_inputs, topk=20)
+            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(retrieval_inputs, topk=20, user_ids=user_ids)
         else:
             # Fallback to sequential retrieval if batch method not available
-            batch_retrieval_items = [self.retrieval.text_to_item_retrieval(inp, topk=20) for inp in retrieval_inputs]
+            batch_retrieval_items = [self.retrieval.text_to_item_retrieval(inp, topk=20, user_id=uid) for inp, uid in zip(retrieval_inputs, user_ids)]
 
         recommend_items = [self.item_db.id_to_metadata(items[0]) for items in batch_retrieval_items]
 

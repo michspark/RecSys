@@ -1,7 +1,7 @@
 from .bm25 import BM25_MODEL
 from .bert import BERT_MODEL
 from .bge import BGE_MODEL
-from .retriever import CLAP_MODEL, HYBRID_MODEL
+from .retriever import CLAP_MODEL, HYBRID_MODEL, RERANKER
 
 
 def load_retrieval_module(
@@ -28,11 +28,25 @@ def load_retrieval_module(
             ),
             split_types=track_split_types,
         )
+        reranker = RERANKER(
+            track_embedding_dataset=kwargs.get(
+                "clap_embedding_dataset",
+                "talkpl-ai/TalkPlayData-Challenge-Track-Embeddings",
+            ),
+            user_embedding_dataset=kwargs.get(
+                "user_embedding_dataset",
+                "talkpl-ai/TalkPlayData-Challenge-User-Embeddings",
+            ),
+            split_types=track_split_types,
+            cache_dir="./precomputed/reranker",
+        )
         return HYBRID_MODEL(
             bge_model=bge_model,
             clap_model=clap_model,
             alpha=kwargs.get("alpha", 0.6),
             beta=kwargs.get("beta", 0.4),
+            keyword_cache_path=kwargs.get("keyword_cache_path"),
+            reranker=reranker,
         )
     else:
         raise ValueError(f"Unsupported retrieval type: {retrieval_type}")
