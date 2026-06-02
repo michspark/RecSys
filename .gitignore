@@ -7,3 +7,5 @@ uv.lock
 exp/
 track_name_artist_name_album_name_release_date/
 precomputed/
+.claude/
+CLAUDE.md

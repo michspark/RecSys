@@ -91,12 +91,16 @@ def main(args):
     for item in db:
         user_id = item['user_id']
         session_id = item['session_id']
+        category    = item['conversation_goal']['category']
+        specificity = item['conversation_goal']['specificity']
         for target_turn_number in range(1, 9):
             chat_history, user_query = chat_history_parser(item['conversations'], music_crs, target_turn_number)
             batch_data.append({
-                'user_query': user_query,
-                'user_id': user_id,
-                'session_memory': chat_history
+                'user_query':   user_query,
+                'user_id':      user_id,
+                'session_memory': chat_history,
+                'category':     category,
+                'specificity':  specificity,
             })
             metadata.append({
                 'session_id': session_id,

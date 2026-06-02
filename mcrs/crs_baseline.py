@@ -120,7 +120,7 @@ class CRS_BASELINE:
 
         # stage1. retrieval
         retrieval_input = "\n".join([f"{conversation['role']}: {conversation['content']}" for conversation in self.session_memory]) # formats the entire chat history into a single string for retrieval
-        retrieval_items = self.retrieval.text_to_item_retrieval(retrieval_input, topk=20) # Passes this retrieval module to find the top 20 relevent items
+        retrieval_items = self.retrieval.text_to_item_retrieval(retrieval_input, topk=50)
         recommend_item = self.item_db.id_to_metadata(retrieval_items[0]) # Takes absolute best match and fetches its full metadata from the item
 
         # stage2. response generation
@@ -154,6 +154,7 @@ class CRS_BASELINE:
         session_memories = []
         user_ids = []
 
+        categories, specificities = [], []
         for data in batch_data:
             user_query = data['user_query']
             user_id = data.get('user_id')
@@ -165,13 +166,21 @@ class CRS_BASELINE:
             retrieval_inputs.append(retrieval_input)
             session_memories.append(session_memory)
             user_ids.append(user_id)
+            categories.append(data.get('category'))
+            specificities.append(data.get('specificity'))
 
         # Stage 1: Batch retrieval
         if hasattr(self.retrieval, 'batch_text_to_item_retrieval'):
-            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(retrieval_inputs, topk=20, user_ids=user_ids)
+            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(
+                retrieval_inputs, topk=50, user_ids=user_ids,
+                categories=categories, specificities=specificities,
+            )
         else:
-            # Fallback to sequential retrieval if batch method not available
-            batch_retrieval_items = [self.retrieval.text_to_item_retrieval(inp, topk=20, user_id=uid) for inp, uid in zip(retrieval_inputs, user_ids)]
+            batch_retrieval_items = [
+                self.retrieval.text_to_item_retrieval(inp, topk=50, user_id=uid,
+                                                       category=cat, specificity=spec)
+                for inp, uid, cat, spec in zip(retrieval_inputs, user_ids, categories, specificities)
+            ]
 
         recommend_items = [self.item_db.id_to_metadata(items[0]) for items in batch_retrieval_items]
 
