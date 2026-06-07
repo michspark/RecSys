@@ -1,7 +1,7 @@
 from .bm25 import BM25_MODEL
 from .bert import BERT_MODEL
 from .bge import BGE_MODEL
-from .retriever import CLAP_MODEL, HYBRID_MODEL, RERANKER
+from .retriever import CLAP_MODEL, HYBRID_MODEL, RERANKER, ANCHOR_CF_MODEL
 
 
 def load_retrieval_module(
@@ -18,6 +18,17 @@ def load_retrieval_module(
         return BERT_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
     elif retrieval_type == "bge":
         return BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
+    elif retrieval_type == "anchor_cf":
+        # BGE 누적쿼리 + anchor 메타 + cf-bpr(beta) 융합
+        bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
+        return ANCHOR_CF_MODEL(
+            bge_model=bge_model,
+            cf_cache_dir=kwargs.get("cf_cache_dir", "./precomputed/reranker"),
+            beta=kwargs.get("beta", 0.2),
+            alpha_start=kwargs.get("alpha_start", 0.25),
+            alpha_step=kwargs.get("alpha_step", 0.05),
+            alpha_cap=kwargs.get("alpha_cap", 0.60),
+        )
     elif retrieval_type == "hybrid":
         bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
         clap_model = CLAP_MODEL(

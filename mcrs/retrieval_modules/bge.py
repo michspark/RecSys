@@ -1,6 +1,6 @@
-"""BERT embedding-based retrieval utilities for music track metadata.
+"""BGE embedding-based retrieval utilities for music track metadata.
 
-This module embeds selected metadata fields using a BERT encoder, caches the
+This module embeds selected metadata fields using a BGE encoder, caches the
 embeddings to disk, and retrieves items for a query using cosine similarity.
 Token embeddings are averaged (mean pooling) to form a global embedding.
 """
@@ -12,7 +12,6 @@ import torch
 import torch.nn.functional as F
 from datasets import load_dataset, concatenate_datasets
 from transformers import AutoTokenizer, AutoModel
-
 
 class BGE_MODEL:
     """BERT-based embedding retriever over track metadata.
@@ -32,7 +31,7 @@ class BGE_MODEL:
         batch_size: int = 32,
         max_length: int = 128
     ) -> None:
-        """Initialize the BERT retriever.
+        """Initialize the BGE retriever.
         Args:
             dataset_name: Hugging Face dataset name containing track metadata.
             split_types: Dataset splits to load and concatenate.
@@ -156,18 +155,18 @@ class BGE_MODEL:
             query_emb = outputs.last_hidden_state[:, 0] # [1, h] using [CLS] token
             query_emb = F.normalize(query_emb, p=2, dim=1).cpu().squeeze(0)
 
-
         # cosine similarity since embeddings are L2-normalized: mat @ query
         scores = torch.matmul(self.embeddings, query_emb)  # [N]
         topk = min(topk, scores.shape[0])
         top_indices = torch.topk(scores, k=topk).indices.tolist()
         return [self.track_ids[i] for i in top_indices]
 
-    def batch_text_to_item_retrieval(self, queries: List[str], topk: int) -> List[List[str]]:
+    def batch_text_to_item_retrieval(self, queries: List[str], topk: int, user_ids=None) -> List[List[str]]:
         """Retrieve top-k track IDs for multiple queries in batch via cosine similarity.
         Args:
             queries: List of user text queries to embed and compare against the corpus.
             topk: Number of items to retrieve per query.
+            user_ids: List of user IDs corresponding to each query.
         Returns:
             A list of lists, where each inner list contains track IDs ordered by decreasing cosine similarity.
         """

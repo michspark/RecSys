@@ -167,7 +167,18 @@ class CRS_BASELINE:
             user_ids.append(user_id)
 
         # Stage 1: Batch retrieval
-        if hasattr(self.retrieval, 'batch_text_to_item_retrieval'):
+        if getattr(self.retrieval, 'accepts_anchor', False):
+            # anchor 기반 검색기(ANCHOR_CF_MODEL): pipeline이 anchor 정보를 주입한다.
+            anchor_track_ids = [data.get('anchor_track_id') for data in batch_data]
+            positive_track_ids = [data.get('positive_track_ids') for data in batch_data]
+            exclude_ids_list = [data.get('exclude_ids') for data in batch_data]
+            turn_numbers = [data.get('turn_number') for data in batch_data]
+            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(
+                retrieval_inputs, topk=20, user_ids=user_ids,
+                anchor_track_ids=anchor_track_ids, positive_track_ids=positive_track_ids,
+                exclude_ids_list=exclude_ids_list, turn_numbers=turn_numbers,
+            )
+        elif hasattr(self.retrieval, 'batch_text_to_item_retrieval'):
             batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(retrieval_inputs, topk=20, user_ids=user_ids)
         else:
             # Fallback to sequential retrieval if batch method not available
