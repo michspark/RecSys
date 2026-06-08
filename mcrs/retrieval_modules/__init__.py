@@ -1,7 +1,7 @@
 from .bm25 import BM25_MODEL
 from .bert import BERT_MODEL
 from .bge import BGE_MODEL
-from .retriever import CLAP_MODEL, HYBRID_MODEL, RERANKER, ANCHOR_CF_MODEL
+from .retriever import CLAP_MODEL, HYBRID_MODEL, RERANKER, ANCHOR_CF_MODEL, ANCHOR_BGE_BM25_CF_MODEL
 
 
 def load_retrieval_module(
@@ -28,6 +28,22 @@ def load_retrieval_module(
             alpha_start=kwargs.get("alpha_start", 0.25),
             alpha_step=kwargs.get("alpha_step", 0.05),
             alpha_cap=kwargs.get("alpha_cap", 0.60),
+        )
+    elif retrieval_type == "anchor_bge_bm25_cf":
+        # anchor_cf(best) + BM25 sparse 채널을 RRF 순위융합으로 결합
+        bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
+        bm25_model = BM25_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
+        return ANCHOR_BGE_BM25_CF_MODEL(
+            bge_model=bge_model,
+            bm25_model=bm25_model,
+            cf_cache_dir=kwargs.get("cf_cache_dir", "./precomputed/reranker"),
+            beta=kwargs.get("beta", 0.2),
+            alpha_start=kwargs.get("alpha_start", 0.25),
+            alpha_step=kwargs.get("alpha_step", 0.05),
+            alpha_cap=kwargs.get("alpha_cap", 0.60),
+            bm25_topk=kwargs.get("bm25_topk", 150),
+            dense_pool=kwargs.get("dense_pool", 200),
+            rrf_k=kwargs.get("rrf_k", 60),
         )
     elif retrieval_type == "hybrid":
         bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)

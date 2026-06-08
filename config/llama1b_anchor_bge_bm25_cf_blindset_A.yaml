@@ -1,0 +1,20 @@
+lm_type: "meta-llama/Llama-3.2-1B-Instruct"
+retrieval_type: "anchor_bge_bm25_cf"
+test_dataset_name: "talkpl-ai/TalkPlayData-Challenge-Blind-A"
+item_db_name: "talkpl-ai/TalkPlayData-Challenge-Track-Metadata"
+user_db_name: "talkpl-ai/TalkPlayData-Challenge-User-Metadata"
+track_split_types:
+  - "all_tracks"
+  - "test_tracks"
+user_split_types:
+  - "all_users"
+corpus_types:
+  - "track_name"
+  - "artist_name"
+  - "album_name"
+  - "tag_list"
+cache_dir: "./cache"
+device: "cuda"
+attn_implementation: "sdpa"
+# anchor_cf 전용: blindset은 goal_progress_assessment 라벨이 없으므로 false(과거 모든 music을 positive로 사용).
+anchor_feedback: false

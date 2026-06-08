@@ -48,6 +48,32 @@ def chat_history_parser(conversations, music_crs, target_turn_number):
     user_query = df_current_turn.iloc[0]['content']
     return chat_history, user_query
 
+def compute_anchor_info(conversations, assessments, target_turn_number, anchor_feedback):
+    """anchor_cf 검색기에 넘길 (anchor_track_id, positive_track_ids, exclude_ids) 계산.
+
+    - exclude_ids: target 이전에 추천된 모든 music 트랙(중복 추천 방지, 라벨 불필요).
+    - anchor_feedback=True : positive = goal_progress_assessment가 MOVES_TOWARD_GOAL인 턴의 music,
+                             anchor = 그중 마지막 (오라클 라벨, devset 재현용).
+    - anchor_feedback=False: positive = 과거 모든 music, anchor = 직전 추천 트랙 (라벨 불필요, blindset용).
+    """
+    # 턴 번호 → 그 턴에 추천된 music 트랙 ID
+    turn_to_music = {turn['turn_number']: turn['content']
+                     for turn in conversations if turn['role'] == 'music'}
+    feedback = {a['turn_number']: (a.get('goal_progress_assessment') == 'MOVES_TOWARD_GOAL')
+                for a in assessments}
+
+    exclude_ids, positive_ids, anchor_id = [], [], None
+    for turn_number in range(1, target_turn_number):
+        track_id = turn_to_music.get(turn_number)
+        if track_id is None:
+            continue
+        exclude_ids.append(track_id)
+        is_positive = feedback.get(turn_number, False) if anchor_feedback else True
+        if is_positive:
+            positive_ids.append(track_id)
+            anchor_id = track_id   # 마지막 (긍정) 트랙으로 갱신
+    return anchor_id, positive_ids, exclude_ids
+
 def main(args):
     """
     Run batch inference on TalkPlayData-2 test dataset.
@@ -84,23 +110,34 @@ def main(args):
         dtype=torch.bfloat16
     )
     db = load_dataset(config.test_dataset_name, split="test")
+    # anchor_cf 검색기용: blindset은 goal_progress 라벨이 없으므로 기본 False
+    anchor_feedback = getattr(config, "anchor_feedback", False)
     # Prepare all batch data at once
     batch_data, metadata = [], []
     for item in db:
         user_id = item['user_id']
         session_id = item['session_id']
-        chat_history = item['conversations'][:-1]
-        user_query = item['conversations'][-1]['content']
-        turn_number = item['conversations'][-1]['turn_number']
+        assessments = item.get('goal_progress_assessments', [])
+        # blind set은 각 item의 마지막 conversation 턴이 예측 대상이다.
+        target_turn_number = item['conversations'][-1]['turn_number']
+        # devset 파이프라인과 동일하게: music 트랙 ID를 메타데이터로 변환하고 target 이전만 history로 사용
+        chat_history, user_query = chat_history_parser(item['conversations'], music_crs, target_turn_number)
+        anchor_id, positive_ids, exclude_ids = compute_anchor_info(
+            item['conversations'], assessments, target_turn_number, anchor_feedback
+        )
         batch_data.append({
             'user_query': user_query,
             'user_id': user_id,
-            'session_memory': chat_history
+            'session_memory': chat_history,
+            'anchor_track_id': anchor_id,
+            'positive_track_ids': positive_ids,
+            'exclude_ids': exclude_ids,
+            'turn_number': target_turn_number,
         })
         metadata.append({
             'session_id': session_id,
             'user_id': user_id,
-            'turn_number': turn_number
+            'turn_number': target_turn_number
         })
     inference_results = []
     for i in tqdm(range(0, len(batch_data), args.batch_size), desc="Batch inference"):
