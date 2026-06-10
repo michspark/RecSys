@@ -40,6 +40,7 @@ class CRS_BASELINE:
         attn_implementation="eager",
         dtype=torch.bfloat16,
         keyword_cache_path: str = None,
+        lm_model=None,
     ):
         """Initialize the CRS baseline components.
 
@@ -66,7 +67,9 @@ class CRS_BASELINE:
         self.dtype = dtype
         self.attn_implementation = attn_implementation
         self.keyword_cache_path = keyword_cache_path
-        self.lm = load_lm_module(self.lm_type, self.device, self.attn_implementation, self.dtype)
+        # lm_model: optional config block selecting the LM version (v1/v2) + its generation knobs.
+        self.lm_model = lm_model
+        self.lm = load_lm_module(self.lm_type, self.device, self.attn_implementation, self.dtype, lm_model=self.lm_model)
         self.retrieval = load_retrieval_module(self.retrieval_type, self.item_db_name, self.track_split_types, self.corpus_types, self.cache_dir, lm=self.lm, keyword_cache_path=keyword_cache_path)
         self.item_db = MusicCatalogDB(self.item_db_name, self.track_split_types, self.corpus_types)
         self.user_db = UserProfileDB(self.user_db_name, self.user_split_types)

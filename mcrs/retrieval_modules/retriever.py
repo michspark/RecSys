@@ -1,7 +1,9 @@
 import os
+import re
 import json
 import hashlib
-from typing import List, Optional
+from typing import List, Optional, Dict
+import numpy as np
 import torch
 import torch.nn.functional as F
 from datasets import load_dataset, concatenate_datasets
@@ -299,7 +301,8 @@ class ANCHOR_BGE_BM25_CF_MODEL:
     def __init__(self, bge_model, bm25_model, cf_cache_dir: str = "./precomputed/reranker",
                  beta: float = 0.2, alpha_start: float = 0.25, alpha_step: float = 0.05,
                  alpha_cap: float = 0.60, bm25_topk: int = 150, dense_pool: int = 200,
-                 rrf_k: int = 60) -> None:
+                 rrf_k: int = 10, rerank_weights: Optional[Dict[str, float]] = None,
+                 rerank_pool: int = 100) -> None:
 
         self.bge = bge_model
         self.device = bge_model.device
@@ -314,7 +317,15 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         self.bm25 = bm25_model       # 기존 raw BM25 인덱스(stopwords on, stemmer 없음)
         self.bm25_topk = bm25_topk   # BM25에서 뽑을 후보 수
         self.dense_pool = dense_pool # dense(best=BGE+anchor+cf)에서 뽑을 후보 수 (RRF 입력 풀)
-        self.rrf_k = rrf_k           # RRF 상수 K (관례적으로 60)
+        self.rrf_k = rrf_k           # RRF 상수 K (sweep 확인: 10이 최적, nDCG@20 0.1489)
+
+        # 규칙 기반 reranker (학습 없음): RRF top-N 후보를 메타 신호 가점으로 재정렬.
+        #  - rerank_pool: RRF로 먼저 뽑아 재정렬 입력으로 쓸 후보 수 (top-100).
+        #  - rerank_weights: 신호 가중치. None/{}이면 reranker 비활성(=RRF 순위 그대로)이 기본.
+        #    devset 스윕 검증 최적은 {"artist":2.0,"era":1.0,"pop":0.2}(+0.005). 다만 blindset
+        #    일반화는 미확인이라 기본 off. 켜려면 이 값을 명시 전달.
+        self.rerank_pool = rerank_pool
+        self.rerank_weights = rerank_weights if rerank_weights is not None else {}
 
         # cf-bpr 트랙 인덱스 (RERANKER가 빌드한 정규화 캐시 재사용)
         cf_embs = torch.load(os.path.join(cf_cache_dir, "cf_bpr_track.pt"), map_location="cpu")
@@ -327,7 +338,8 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         self.cf_pos = torch.tensor(cf_pos, dtype=torch.long, device=self.device)
         self.valid_cf = self.cf_pos >= 0
         print(f"[ANCHOR_BGE_BM25_CF] BGE tracks={len(self.track_ids)} | cf-bpr aligned={int(self.valid_cf.sum())} "
-              f"| beta={beta} alpha={alpha_start}->{alpha_cap} | bm25_topk={bm25_topk} dense_pool={dense_pool} rrf_k={rrf_k}")
+              f"| beta={beta} alpha={alpha_start}->{alpha_cap} | bm25_topk={bm25_topk} dense_pool={dense_pool} rrf_k={rrf_k} "
+              f"| rerank={self.rerank_weights or 'off'} pool={rerank_pool}")
 
     @staticmethod
     def _rrf_fuse(ranked_lists: List[List[str]], topk: int, k: int) -> List[str]:
@@ -433,8 +445,150 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         # BM25(sparse) 후보 풀: 동일 누적쿼리로 lexical 검색 후 exclude 제거
         bm25_ranked = [t for t in self.bm25.text_to_item_retrieval(query, self.bm25_topk) if t not in exclude]
 
-        # 두 채널 순위를 RRF로 융합 → 상위 topk (test의 집합 union을 순위형으로 승격)
-        return self._rrf_fuse([dense_ranked, bm25_ranked], topk, self.rrf_k)
+        # 두 채널 순위를 RRF로 융합 → reranker 입력 풀(top-100). (rerank_pool >= topk)
+        pool = max(topk, self.rerank_pool)
+        fused = self._rrf_fuse([dense_ranked, bm25_ranked], pool, self.rrf_k)
+
+        # 규칙 기반 reranker: 켜져 있으면 메타 신호 가점으로 재정렬 후 topk. 비활성이면 RRF 그대로.
+        if self.rerank_weights:
+            fused = self._rule_rerank(query, fused)
+        return fused[:topk]
+
+    # ----- 규칙 기반 reranker (학습 없음) -----------------------------------
+    # RRF top-N 후보를 메타 신호로 가점해 재정렬. 신호/가중치는 devset 스윕으로 검증됨
+    # (exact_name 제거, artist/era/pop). test/rerank_rule_signals.py와 동일한 로직.
+    @staticmethod
+    def _meta_first(value) -> str:
+        """list[str] 메타 필드(track_name/artist_name)의 첫 원소를 소문자로. 비었으면 ''."""
+        if isinstance(value, list):
+            return value[0].lower() if value else ""
+        if isinstance(value, str):
+            return value.lower()
+        return ""
+
+    def _signal_boosts(self, signal_name: str, query_lower: str,
+                       candidate_ids: List[str]) -> Dict[str, float]:
+        """신호별 {track_id: boost} 계산. 메타는 bge.metadata_dict(전체 메타 row) 사용."""
+        meta = self.bge.metadata_dict
+        boost: Dict[str, float] = {}
+        if signal_name == "artist":
+            # 아티스트명이 쿼리에 통째로 등장하면 가점 (3자 이상, 오매칭 방지)
+            for tid in candidate_ids:
+                artist = self._meta_first(meta.get(tid, {}).get("artist_name"))
+                if artist and len(artist) >= 3 and artist in query_lower:
+                    boost[tid] = 1.0
+        elif signal_name == "exact_name":
+            # 곡명이 쿼리에 통째로 등장하면 가점 (4자 이상, 오매칭 방지)
+            for tid in candidate_ids:
+                name = self._meta_first(meta.get(tid, {}).get("track_name"))
+                if name and len(name) >= 4 and name in query_lower:
+                    boost[tid] = 1.0
+        elif signal_name == "era":
+            # 쿼리의 연도(YYYY)/연대(90s 등)와 release_date 연도가 일치하면 가점
+            years = set(re.findall(r"\b(?:19\d{2}|20\d{2})\b", query_lower))
+            decades = {m[1] for m in re.findall(r"\b(19|20)?(\d0)s\b", query_lower)}
+            if not years and not decades:
+                return boost
+            for tid in candidate_ids:
+                release_date = meta.get(tid, {}).get("release_date")
+                if not release_date:
+                    continue
+                year_str = str(release_date)[:4]
+                if not year_str.isdigit():
+                    continue
+                if year_str in years:
+                    boost[tid] = 1.0
+                    continue
+                decade_two_digit = f"{(int(year_str) % 100) // 10 * 10:02d}"
+                if decade_two_digit in decades:
+                    boost[tid] = 1.0
+        elif signal_name == "pop":
+            # popularity를 후보 풀 안에서 min-max 정규화한 약한 보조 가점
+            pops = np.array(
+                [float(meta.get(tid, {}).get("popularity", 0) or 0) for tid in candidate_ids],
+                dtype=float,
+            )
+            span = pops.max() - pops.min()
+            if span < 1e-9:
+                return {tid: 0.0 for tid in candidate_ids}
+            normalized = (pops - pops.min()) / span
+            return {tid: float(normalized[i]) for i, tid in enumerate(candidate_ids)}
+        return boost
+
+    def _rule_rerank(self, query: str, fused: List[str]) -> List[str]:
+        """RRF top-N(fused)을 규칙 신호 가점으로 재정렬해 반환.
+
+        base 점수 = 순위 위치의 RRF식 역수 1/(rrf_k+i+1)를 z-score 정규화(신호 스케일 맞춤).
+        base만으로는 원래 RRF 순서를 보존하므로, 신호 가점이 순서를 바꾸는 부분만 작동한다.
+        """
+        query_lower = query.lower()
+        candidate_count = len(fused)
+        base_scores = np.array([1.0 / (self.rrf_k + i + 1) for i in range(candidate_count)], dtype=float)
+        base_z = (base_scores - base_scores.mean()) / (base_scores.std() + 1e-8)
+        score: Dict[str, float] = {tid: float(base_z[i]) for i, tid in enumerate(fused)}
+        # 켜진(weight>0) 신호만 가중 가점 누적
+        for signal_name, weight in self.rerank_weights.items():
+            if weight <= 0:
+                continue
+            for tid, boost in self._signal_boosts(signal_name, query_lower, fused).items():
+                score[tid] += weight * boost
+        # 점수 내림차순(동점은 stable sort로 원래 RRF 순서 유지)
+        return sorted(fused, key=lambda tid: score[tid], reverse=True)
+
+    def get_channel_rankings(self, query: str, anchor_track_id: Optional[str] = None,
+                             positive_track_ids: Optional[List[str]] = None,
+                             exclude_ids: Optional[List[str]] = None,
+                             turn_number: Optional[int] = None):
+        """RRF 융합 직전의 두 채널 후보 리스트 (dense_ranked, bm25_ranked)를 반환.
+
+        rrf_k 스윕용: 비싼 dense 인코딩+BM25 검색을 turn당 1회만 하고, rrf_k만 바꿔
+        재융합(_rrf_fuse)하기 위함. rrf_k는 융합 상수일 뿐 후보 추출엔 영향이 없다.
+
+        주의: 아래 본문은 text_to_item_retrieval의 RRF 직전(query 인코딩~bm25_ranked)과
+        '글자 그대로 동일'해야 한다. 그래야 _rrf_fuse(..., rrf_k=60) 재융합 시 0.1468이
+        재현된다. text_to_item_retrieval 수정 시 이 메서드도 반드시 동기화할 것.
+        """
+        # ↓↓↓ text_to_item_retrieval 본문(RRF 직전까지)과 동일 ↓↓↓
+        query_vec = self._encode(query, is_query=True)
+        exclude = set(exclude_ids or [])
+
+        # anchor 벡터 블렌딩 (같은 BGE 공간)
+        alpha = self._alpha(turn_number)
+        if alpha > 0 and anchor_track_id is not None:
+            anchor_vec = self._encode_anchor(anchor_track_id)
+            if anchor_vec is not None:
+                query_vec = F.normalize(alpha * anchor_vec + (1 - alpha) * query_vec, p=2, dim=0)
+                exclude.add(anchor_track_id)
+
+        bge_score = self.track_embs @ query_vec   # [N]
+
+        # cf-bpr 채널 (score-level z-score 융합)
+        cf_q = self._cf_query(positive_track_ids) if self.beta > 0 else None
+        if cf_q is not None:
+            cf_raw = self.cf_embs @ cf_q          # [M]
+            aligned = torch.full((len(self.track_ids),), float("nan"), device=self.device)
+            aligned[self.valid_cf] = cf_raw[self.cf_pos[self.valid_cf]]
+            nan_mask = torch.isnan(aligned)
+            aligned[nan_mask] = aligned[~nan_mask].mean()   # cf 없는 후보는 평균 대체
+            final = (1 - self.beta) * self._zscore(bge_score) + self.beta * self._zscore(aligned)
+        else:
+            final = bge_score
+
+        # 과거 추천 + anchor 제외 (dense score에서 -1e9로 침몰)
+        for eid in exclude:
+            idx = self.track_id_to_idx.get(eid)
+            if idx is not None:
+                final[idx] = -1e9
+
+        # dense(best=BGE+anchor+cf) 후보 풀: 점수 상위 dense_pool개를 순위대로
+        dense_n = min(self.dense_pool, final.shape[0])
+        dense_indices = torch.topk(final, dense_n).indices.cpu().tolist()
+        dense_ranked = [self.track_ids[i] for i in dense_indices if self.track_ids[i] not in exclude]
+
+        # BM25(sparse) 후보 풀: 동일 누적쿼리로 lexical 검색 후 exclude 제거
+        bm25_ranked = [t for t in self.bm25.text_to_item_retrieval(query, self.bm25_topk) if t not in exclude]
+        # ↑↑↑ 여기까지 text_to_item_retrieval과 동일 ↑↑↑
+        return dense_ranked, bm25_ranked
 
     def batch_text_to_item_retrieval(self, queries: List[str], topk: int, user_ids: List = None,
                                      anchor_track_ids: List = None, positive_track_ids: List = None,

@@ -1,0 +1,30 @@
+# Method E LM backend (LLAMA_MODEL_v2) on Blind-A: Qwen3-8B + instruct + sampling + natural prompt.
+# Same lm_model block as the devset E config; only the dataset + anchor_feedback differ for blindset.
+lm_model:
+  version: "v2"                     # "v1" = LLAMA_MODEL, "v2" = LLAMA_MODEL_v2 (method E)
+  model_name: "Qwen/Qwen3-8B"
+  attn_implementation: "sdpa"       # memory-light attention so Qwen3-8B fits 24GB
+  prompt_mode: "instruct"           # "instruct" | "inject"
+  do_sample: true                   # sampling decoding
+  temperature: 0.8
+  top_p: 0.9
+  max_new_tokens: 128
+  system_prompt: "natural"          # "natural" swaps the checklist response_generation block
+retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse 채널을 RRF로 융합 (best 검색기)
+test_dataset_name: "talkpl-ai/TalkPlayData-Challenge-Blind-A"
+item_db_name: "talkpl-ai/TalkPlayData-Challenge-Track-Metadata"
+user_db_name: "talkpl-ai/TalkPlayData-Challenge-User-Metadata"
+track_split_types:
+  - "all_tracks"
+  - "test_tracks"
+user_split_types:
+  - "all_users"
+corpus_types:
+  - "track_name"
+  - "artist_name"
+  - "album_name"
+  - "tag_list"
+cache_dir: "./cache"
+device: "cuda"
+# anchor_cf 전용: blindset은 goal_progress_assessment 라벨이 없으므로 false(과거 모든 music을 positive로 사용).
+anchor_feedback: false

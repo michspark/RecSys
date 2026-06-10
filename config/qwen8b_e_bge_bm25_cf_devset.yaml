@@ -1,0 +1,32 @@
+# Method E LM backend (LLAMA_MODEL_v2): Qwen3-8B + instruct prompt mode + sampling + natural prompt.
+# All LM settings live under `lm_model`. Top-level lm_type/attn_implementation are intentionally
+# omitted: when lm_model is present it carries the LM config, and the run scripts fall back to
+# defaults for the (now unused) top-level fields.
+lm_model:
+  version: "v2"                     # "v1" = LLAMA_MODEL, "v2" = LLAMA_MODEL_v2 (method E)
+  model_name: "Qwen/Qwen3-8B"
+  attn_implementation: "sdpa"       # memory-light attention so Qwen3-8B fits 24GB
+  prompt_mode: "instruct"           # "instruct" | "inject"
+  do_sample: true                   # sampling decoding
+  temperature: 0.8
+  top_p: 0.9
+  max_new_tokens: 128
+  system_prompt: "natural"          # "natural" swaps the checklist response_generation block
+retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse 채널을 RRF로 융합 (best 검색기)
+test_dataset_name: "talkpl-ai/TalkPlayData-Challenge-Dataset"
+item_db_name: "talkpl-ai/TalkPlayData-Challenge-Track-Metadata"
+user_db_name: "talkpl-ai/TalkPlayData-Challenge-User-Metadata"
+track_split_types:
+  - "all_tracks"
+  - "test_tracks"
+user_split_types:
+  - "all_users"
+corpus_types:
+  - "track_name"
+  - "artist_name"
+  - "album_name"
+  - "tag_list"
+cache_dir: "./cache"
+device: "cuda"
+# anchor_cf 전용: 긍정 판정에 goal_progress_assessment 라벨 사용(devset 재현). blindset은 false.
+anchor_feedback: true

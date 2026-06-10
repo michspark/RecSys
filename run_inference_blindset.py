@@ -97,7 +97,9 @@ def main(args):
     os.system("rm -rf cache")
     config = OmegaConf.load(f"config/{args.tid}.yaml")
     music_crs = load_crs_baseline(
-        lm_type=config.lm_type,
+        # lm_type/attn_implementation are now optional top-level fallbacks; the lm_model block
+        # (when present) carries the LM settings, so default them if the config omits them.
+        lm_type=getattr(config, "lm_type", "meta-llama/Llama-3.2-1B-Instruct"),
         retrieval_type=config.retrieval_type,
         item_db_name=config.item_db_name,
         user_db_name=config.user_db_name,
@@ -106,8 +108,10 @@ def main(args):
         corpus_types=config.corpus_types,
         cache_dir=config.cache_dir,
         device=config.device,
-        attn_implementation=config.attn_implementation,
-        dtype=torch.bfloat16
+        attn_implementation=getattr(config, "attn_implementation", "eager"),
+        dtype=torch.bfloat16,
+        keyword_cache_path=getattr(config, "keyword_cache_path", None),
+        lm_model=getattr(config, "lm_model", None),
     )
     db = load_dataset(config.test_dataset_name, split="test")
     # anchor_cf 검색기용: blindset은 goal_progress 라벨이 없으므로 기본 False

@@ -43,7 +43,8 @@ def load_retrieval_module(
             alpha_cap=kwargs.get("alpha_cap", 0.60),
             bm25_topk=kwargs.get("bm25_topk", 150),
             dense_pool=kwargs.get("dense_pool", 200),
-            rrf_k=kwargs.get("rrf_k", 60),
+            rrf_k=kwargs.get("rrf_k", 60),               # 기본 60(이전 상태). k=10 쓰려면 명시 전달
+            rerank_weights=kwargs.get("rerank_weights"),  # 기본 off(None→{}). 켜려면 가중치 명시 전달
         )
     elif retrieval_type == "hybrid":
         bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
