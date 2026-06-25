@@ -1,0 +1,40 @@
+# Method E LM backend on Blind-A, but response generation runs on the OpenAI API (GPT-5.4)
+# instead of the local Qwen3-8B. Same retriever (anchor_bge_bm25_cf) + dataset as the Qwen E config;
+# only the lm_model block differs (version "api" -> OPENAI_MODEL). No local LLM is loaded.
+lm_model:
+  version: "api"                    # "api" = OPENAI_MODEL (remote); "v2" = local Qwen3-8B (method E)
+  model_name: "gpt-5.4"             # ⚠️ 실제 OpenAI 모델 ID로 맞출 것 (코드는 이 문자열을 그대로 API에 전달)
+  temperature: 0.8
+  max_new_tokens: 128               # API에는 max_tokens로 전달됨
+  system_prompt: "natural"          # checklist 블록을 NATURAL_RESPONSE_PROMPT로 교체
+  frequency_penalty: 0.4            # OpenAI판 반복 억제 (HF의 repetition_penalty 대체). LexDiv↑용; 0.3~0.5 튜닝
+  presence_penalty: 0.0
+retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse 채널을 RRF로 융합 (best 검색기)
+test_dataset_name: "talkpl-ai/TalkPlayData-Challenge-Blind-A"
+item_db_name: "talkpl-ai/TalkPlayData-Challenge-Track-Metadata"
+user_db_name: "talkpl-ai/TalkPlayData-Challenge-User-Metadata"
+track_split_types:
+  - "all_tracks"
+  - "test_tracks"
+user_split_types:
+  - "all_users"
+corpus_types:
+  - "track_name"
+  - "artist_name"
+  - "album_name"
+  - "tag_list"
+cache_dir: "./cache"
+device: "cuda"
+# anchor_cf 전용: blindset은 goal_progress_assessment 라벨이 없으므로 false(과거 모든 music을 positive로 사용).
+anchor_feedback: false
+# LLM reranker는 API 백엔드에선 쓸 수 없음(logit 접근 불가) → 반드시 off 유지.
+reranker:
+  enabled: false                     # blindset 제출용 (false면 retrieval 그대로 = version A)
+  type: "llm"
+  method: "pointwise"
+  n_candidates: 20
+  topk: 20
+  max_tags: 3
+  chunk_size: 8
+  rank_blend: 0.3
+  temperature: 0.3

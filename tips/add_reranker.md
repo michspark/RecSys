@@ -31,7 +31,6 @@ if self.reranker:
 ```
 
 ---
-
 ## Resource
 
 - https://huggingface.co/datasets/talkpl-ai/TalkPlayData-2-User-Embeddings

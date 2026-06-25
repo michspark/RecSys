@@ -7,7 +7,9 @@ lm_model:
   prompt_mode: "instruct"           # "instruct" | "inject"
   do_sample: true                   # sampling decoding
   temperature: 0.8
-  top_p: 0.9
+  top_p: 0.8
+  repetition_penalty: 1.2           # >1.0: 이미 등장한 토큰에 페널티 → 한 응답 안의 반복 억제
+  no_repeat_ngram_size: 3           # 한 응답 안에서 같은 3-gram이 두 번 나오는 것을 금지 (0=끔)
   max_new_tokens: 128
   system_prompt: "natural"          # "natural" swaps the checklist response_generation block
 retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse 채널을 RRF로 융합 (best 검색기)
@@ -28,3 +30,15 @@ cache_dir: "./cache"
 device: "cuda"
 # anchor_cf 전용: blindset은 goal_progress_assessment 라벨이 없으므로 false(과거 모든 music을 positive로 사용).
 anchor_feedback: false
+# LLM reranker (pointwise): retrieval top-50을 self.lm(Qwen3-8B)이 곡별 p(Yes) 점수로 재정렬해 top-20.
+# Blind-A는 80세션·단일턴(짧은 쿼리)이라 in-pipeline으로 돌려도 메모리 여유 있음(응답까지 한 번에).
+reranker:
+  enabled: false                     # blindset 제출용 (false면 retrieval 그대로 = version A)
+  type: "llm"
+  method: "pointwise"               # pointwise | listwise
+  n_candidates: 20                  # top-20만 재정렬 (21~50은 건드리지 않음)
+  topk: 20
+  max_tags: 3
+  chunk_size: 8                     # pointwise forward 배치 크기
+  rank_blend: 0.3                   # 최종순위 = 0.7*retrieval + 0.3*LLM (보수적)
+  temperature: 0.3                  # listwise일 때만 사용

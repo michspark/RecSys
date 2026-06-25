@@ -114,6 +114,7 @@ def main(args):
         dtype=torch.bfloat16,
         keyword_cache_path=getattr(config, "keyword_cache_path", None),
         lm_model=getattr(config, "lm_model", None),
+        reranker=getattr(config, "reranker", None),
     )
     db = load_dataset(config.test_dataset_name, split="test")
     # anchor_cf 검색기용: 긍정 판정에 goal_progress_assessment 라벨을 쓸지 여부
@@ -154,6 +155,8 @@ def main(args):
                 "user_id": batch_metadata[j]['user_id'],
                 "turn_number": batch_metadata[j]['turn_number'],
                 "predicted_track_ids": result['retrieval_items'],
+                # pre-rerank top-50 pool, used as input by the separate rerank pass (rerank_devset.py)
+                "retrieval_candidates": result.get('retrieval_candidates', result['retrieval_items']),
                 "predicted_response": result["response"]
             })
     os.makedirs("exp/inference/devset", exist_ok=True)

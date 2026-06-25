@@ -1,4 +1,4 @@
-from .llama import LLAMA_MODEL, LLAMA_MODEL_v2
+from .llama import LLAMA_MODEL, LLAMA_MODEL_v2, OPENAI_MODEL
 
 def load_lm_module(lm_type, device, attn_implementation, dtype, lm_model=None):
     """Build the LM backend.
@@ -14,6 +14,16 @@ def load_lm_module(lm_type, device, attn_implementation, dtype, lm_model=None):
         version = lm_model.get("version", "v1")
         model_name = lm_model.get("model_name", lm_type)
         attn = lm_model.get("attn_implementation", attn_implementation)
+        if version == "api":
+            # Remote OpenAI Chat Completions backend (no local weights, no device/dtype).
+            return OPENAI_MODEL(
+                model_name=model_name,
+                temperature=lm_model.get("temperature", 0.8),
+                max_new_tokens=lm_model.get("max_new_tokens", 128),
+                system_prompt=lm_model.get("system_prompt", "natural"),
+                frequency_penalty=lm_model.get("frequency_penalty", 0.0),
+                presence_penalty=lm_model.get("presence_penalty", 0.0),
+            )
         if version == "v2":
             # Method E: instruct prompt mode + sampling + natural system prompt.
             return LLAMA_MODEL_v2(
@@ -25,6 +35,8 @@ def load_lm_module(lm_type, device, attn_implementation, dtype, lm_model=None):
                 do_sample=lm_model.get("do_sample", True),
                 temperature=lm_model.get("temperature", 0.8),
                 top_p=lm_model.get("top_p", 0.9),
+                repetition_penalty=lm_model.get("repetition_penalty", 1.0),
+                no_repeat_ngram_size=lm_model.get("no_repeat_ngram_size", 0),
                 max_new_tokens=lm_model.get("max_new_tokens", 128),
                 system_prompt=lm_model.get("system_prompt", "natural"),
             )

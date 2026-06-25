@@ -112,6 +112,7 @@ def main(args):
         dtype=torch.bfloat16,
         keyword_cache_path=getattr(config, "keyword_cache_path", None),
         lm_model=getattr(config, "lm_model", None),
+        reranker=getattr(config, "reranker", None),
     )
     db = load_dataset(config.test_dataset_name, split="test")
     # anchor_cf 검색기용: blindset은 goal_progress 라벨이 없으므로 기본 False

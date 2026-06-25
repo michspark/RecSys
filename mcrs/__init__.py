@@ -15,5 +15,6 @@ def load_crs_baseline(
     dtype=torch.bfloat16,
     keyword_cache_path: str = None,
     lm_model=None,
+    reranker=None,
 ):
-    return CRS_BASELINE(lm_type, retrieval_type, item_db_name, user_db_name, track_split_types, user_split_types, corpus_types, cache_dir, device, attn_implementation, dtype, keyword_cache_path, lm_model)
+    return CRS_BASELINE(lm_type, retrieval_type, item_db_name, user_db_name, track_split_types, user_split_types, corpus_types, cache_dir, device, attn_implementation, dtype, keyword_cache_path, lm_model, reranker)

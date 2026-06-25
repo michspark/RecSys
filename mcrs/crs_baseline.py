@@ -5,6 +5,7 @@ from mcrs.db_item import MusicCatalogDB
 from mcrs.db_user import UserProfileDB
 from mcrs.lm_modules import load_lm_module
 from mcrs.retrieval_modules import load_retrieval_module
+from mcrs.rerank import LLMReranker
 
 class CRS_BASELINE:
     """
@@ -41,6 +42,7 @@ class CRS_BASELINE:
         dtype=torch.bfloat16,
         keyword_cache_path: str = None,
         lm_model=None,
+        reranker_config=None,
     ):
         """Initialize the CRS baseline components.
 
@@ -80,6 +82,13 @@ class CRS_BASELINE:
             "response_generation": open(f"{self.prompts_dir}/response_generation.txt", "r", encoding="utf-8").read(),
         }
         self.session_memory = []
+        # LLM reranker over retrieval candidates. Reuses self.lm (no extra VRAM).
+        # Disabled config -> rerank() is a no-op returning retrieval[:topk].
+        self.reranker = LLMReranker(
+            llm=self.lm,
+            track_meta_dict=self.item_db.metadata_dict,
+            config=reranker_config or {"enabled": False},
+        )
 
     def _reset_session_memory(self):
         """Clear all messages stored in the current session memory.
@@ -123,8 +132,10 @@ class CRS_BASELINE:
 
         # stage1. retrieval
         retrieval_input = "\n".join([f"{conversation['role']}: {conversation['content']}" for conversation in self.session_memory]) # formats the entire chat history into a single string for retrieval
-        retrieval_items = self.retrieval.text_to_item_retrieval(retrieval_input, topk=20) # Passes this retrieval module to find the top 20 relevent items
-        recommend_item = self.item_db.id_to_metadata(retrieval_items[0]) # Takes absolute best match and fetches its full metadata from the item
+        retrieval_items = self.retrieval.text_to_item_retrieval(retrieval_input, topk=50) # top-50 pool so the reranker can pull up items ranked 21~50
+        retrieval_candidates = list(retrieval_items) # keep the pre-rerank top-50 as the dump for the separate rerank pass (pass 2)
+        retrieval_items = self.reranker.rerank(retrieval_input, retrieval_items, topk=20) # LLM rerank -> top-20 (no-op if reranker disabled)
+        recommend_item = self.item_db.id_to_metadata(retrieval_items[0], include_track_id=False) # Takes absolute best match and fetches its full metadata (no raw track_id in the LLM prompt)
 
         # stage2. response generation
         response = self.lm.response_generation(system_prompt, self.session_memory, recommend_item)
@@ -132,6 +143,7 @@ class CRS_BASELINE:
             "user_id": user_id,
             "user_query": user_query,
             "retrieval_items": retrieval_items,
+            "retrieval_candidates": retrieval_candidates,
             "recommend_item": recommend_item,
             "response": response,
         }
@@ -177,17 +189,26 @@ class CRS_BASELINE:
             exclude_ids_list = [data.get('exclude_ids') for data in batch_data]
             turn_numbers = [data.get('turn_number') for data in batch_data]
             batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(
-                retrieval_inputs, topk=20, user_ids=user_ids,
+                retrieval_inputs, topk=50, user_ids=user_ids,
                 anchor_track_ids=anchor_track_ids, positive_track_ids=positive_track_ids,
                 exclude_ids_list=exclude_ids_list, turn_numbers=turn_numbers,
             )
         elif hasattr(self.retrieval, 'batch_text_to_item_retrieval'):
-            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(retrieval_inputs, topk=20, user_ids=user_ids)
+            batch_retrieval_items = self.retrieval.batch_text_to_item_retrieval(retrieval_inputs, topk=50, user_ids=user_ids)
         else:
             # Fallback to sequential retrieval if batch method not available
-            batch_retrieval_items = [self.retrieval.text_to_item_retrieval(inp, topk=20, user_id=uid) for inp, uid in zip(retrieval_inputs, user_ids)]
+            batch_retrieval_items = [self.retrieval.text_to_item_retrieval(inp, topk=50, user_id=uid) for inp, uid in zip(retrieval_inputs, user_ids)]
 
-        recommend_items = [self.item_db.id_to_metadata(items[0]) for items in batch_retrieval_items]
+        # Keep the pre-rerank top-50 of each query as the dump for the separate rerank pass (pass 2).
+        batch_retrieval_candidates = [list(items) for items in batch_retrieval_items]
+
+        # LLM rerank each query's top-50 pool down to top-20 (sequential; no-op if disabled).
+        batch_retrieval_items = [
+            self.reranker.rerank(retrieval_inputs[i], batch_retrieval_items[i], topk=20)
+            for i in range(len(batch_data))
+        ]
+
+        recommend_items = [self.item_db.id_to_metadata(items[0], include_track_id=False) for items in batch_retrieval_items]
 
         # Stage 2: Batch response generation
         if hasattr(self.lm, 'batch_response_generation'):
@@ -204,6 +225,7 @@ class CRS_BASELINE:
                 "user_id": data.get('user_id'),
                 "user_query": data['user_query'],
                 "retrieval_items": batch_retrieval_items[i],
+                "retrieval_candidates": batch_retrieval_candidates[i],
                 "recommend_item": recommend_items[i],
                 "response": responses[i],
             })

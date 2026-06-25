@@ -30,3 +30,15 @@ cache_dir: "./cache"
 device: "cuda"
 # anchor_cf 전용: 긍정 판정에 goal_progress_assessment 라벨 사용(devset 재현). blindset은 false.
 anchor_feedback: true
+# LLM reranker. 24GB GPU에서는 in-pipeline rerank가 OOM(상주 ~23GB)이라 2-pass로 분리:
+#   pass1 = 이 설정(enabled:false)으로 run_inference_devset.py → retrieval top-50 덤프 + version A.
+#   pass2 = rerank_devset.py가 Qwen3-8B만 올려 enabled:true로 rerank → version B.
+# 따라서 여기서는 enabled:false 유지(in-pipeline rerank off). rerank_devset.py가 아래 값을 읽어 켠다.
+reranker:
+  enabled: false                    # in-pipeline은 off (OOM 회피). pass2 스크립트가 강제로 켬.
+  type: "llm"                       # llm | none
+  n_candidates: 50                  # retrieval에서 받아 재정렬할 후보 수
+  topk: 20                          # 최종 제출 수 (eval은 ndcg@20까지)
+  temperature: 0.3                  # reranking 일관성 (응답생성 0.8과 분리)
+  max_new_tokens: 128               # 번호 20개면 충분
+  reuse_response_llm: true          # 문서용: 코드는 항상 self.lm 재사용
