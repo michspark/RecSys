@@ -1,34 +1,11 @@
 import json
 import re
 import torch
-
-_STRUCTURED_EXTRACTION_PROMPT = """You are a music search query extractor for a conversational recommender system.
-
-You will receive:
-- [LAST USER MESSAGE]: what the user wants RIGHT NOW — this is your PRIMARY focus
-- [CONVERSATION CONTEXT]: previous turns for background only
-
-Your job: extract what the user wants to hear next, based on their LAST MESSAGE.
-
-Output format (JSON only):
-{
-  "direct_request": {"track_name": "...", "artist_name": "..."} or null,
-  "artist_name": "artist most relevant to the LAST user message, or null",
-  "tag_list": "comma-separated mood/genre/instrument/era keywords from the LAST user message",
-  "rejected": ["artists or songs explicitly rejected anywhere in the conversation"]
-}
-
-Rules:
-- direct_request: ONLY when the last message explicitly names a specific song to play
-- tag_list: extract from the LAST message words — mood, energy, genre, instrument, era
-- artist_name: who the user wants next (from last message; ignore if they asked for a different artist)
-- rejected: anything the user said NOT, "not again", "different from", "avoid" across all turns
-- Do NOT invent. Only use what is stated.
-
-Return ONLY valid JSON. No explanation or markdown."""
+from .extraction_prompts import get_prompt, get_result_builder
 
 
-def extract_structured_query(conversation_str: str, lm_components=None) -> dict:
+def extract_structured_query(conversation_str: str, lm_components=None,
+                              category: str = None, specificity: str = None) -> dict:
     """Extract structured search components from a conversation string.
 
     Focuses keyword extraction on the last user message.
@@ -54,45 +31,55 @@ def extract_structured_query(conversation_str: str, lm_components=None) -> dict:
 
     model, tokenizer, device = lm_components
     try:
-        # Explicitly separate last user message from context so Qwen knows where to focus
-        user_content = (
-            f"[LAST USER MESSAGE]\n{last_user_msg}\n\n"
-            f"[CONVERSATION CONTEXT]\n{conversation_str}"
-        ) # Qwen3 가 LAST USER MESSAGE에 집중하도록 명시적으로 구분
+        # Category+specificity별 전용 프롬프트 선택 (placeholder 채우기)
+        prompt_template = get_prompt(category, specificity)
+        system_prompt = prompt_template.format(
+            last_user_msg=last_user_msg,
+            conversation_str=conversation_str,
+        ) if "{last_user_msg}" in prompt_template else prompt_template
+
+        # default.PROMPT는 placeholder가 없으므로 user_content에 직접 넣음
+        if "{last_user_msg}" in prompt_template:
+            user_content = ""  # 이미 system_prompt에 포함됨
+        else:
+            user_content = (
+                f"[LAST USER MESSAGE]\n{last_user_msg}\n\n"
+                f"[CONVERSATION CONTEXT]\n{conversation_str}"
+            )
 
         messages = [
-            {"role": "system", "content": _STRUCTURED_EXTRACTION_PROMPT},
+            {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_content},
-            ]
+        ]
         text = tokenizer.apply_chat_template(
             messages, tokenize=False, add_generation_prompt=True, enable_thinking=False,
         ) # Qwen 3 formatted input
-        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=2048).to(device)
+        inputs = tokenizer(text, return_tensors="pt", truncation=True, max_length=4096).to(device)
         with torch.no_grad():
             outputs = model.generate(
                 **inputs,
-                max_new_tokens=150,
+                max_new_tokens=512,
                 do_sample=False,
                 repetition_penalty=1.1,
                 pad_token_id=tokenizer.eos_token_id,
             )
-        raw = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
+        raw_original = tokenizer.decode(outputs[0][inputs.input_ids.shape[1]:], skip_special_tokens=True).strip()
+        raw = _extract_json(raw_original)
 
-        # Strip <think>...</think> blocks (Qwen3 thinking mode leakage)
-        raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-
-        # Strip markdown fences if present
-        if raw.startswith("```"):
-            raw = raw.split("```")[1]
-            if raw.startswith("json"):
-                raw = raw[4:]
-
-        # Fallback: extract first {...} block if raw has surrounding text
-        if not raw.startswith("{"):
-            m = re.search(r"\{.*\}", raw, re.DOTALL)
-            raw = m.group() if m else raw
+        if not raw.strip():
+            raise ValueError(f"No JSON found. Original output: {repr(raw_original[:200])}")
 
         data = json.loads(raw)
+
+        # Normalize: Qwen sometimes returns list instead of comma-separated string.
+        # Convert list fields to strings before passing to build_result.
+        _TEXT_FIELDS = {
+            "tag_list", "clap_keywords", "lyric_keywords",
+            "visual_keywords", "discovered_elements", "constraints",
+        }
+        for field in _TEXT_FIELDS:
+            if field in data and isinstance(data[field], list):
+                data[field] = ", ".join(str(v) for v in data[field])
 
         # Build BGE query in corpus field format so it matches the index
         bge_parts = []
@@ -104,17 +91,75 @@ def extract_structured_query(conversation_str: str, lm_components=None) -> dict:
 
         # track_name: Blue in Green, artist_name: Miles Davis, tag_list: jazz, cool jazz, mellow
 
-        print(f"[Qwen] direct={data.get('direct_request')} | bge='{bge_query}' | clap='{data.get('tag_list')}' | rejected={data.get('rejected', [])}")
+        # 카테고리 전용 빌더가 있으면 우선 사용 (bge_query / clap_keywords 구성 방식이 다름)
+        builder = get_result_builder(category)
+        if builder:
+            result = builder(data, specificity or "", fallback_query)
+        else:
+            # 범용 빌더: artist_name + tag_list → bge_query, clap_keywords 필드 우선
+            bge_parts = []
+            if data.get("artist_name"):
+                bge_parts.append(f"artist_name: {data['artist_name']}")
+            if data.get("tag_list"):
+                bge_parts.append(f"tag_list: {data['tag_list']}")
+            bge_query = "\n".join(bge_parts) if bge_parts else fallback_query
 
-        return {
-            "direct_request": data.get("direct_request"),
-            "bge_query": bge_query,
-            "clap_keywords": data.get("tag_list") or fallback_query,
-            "rejected": data.get("rejected") or [],
-        }
+            clap_keywords = (
+                data.get("clap_keywords")
+                or data.get("tag_list")
+                or fallback_query
+            )
+            result = {
+                "direct_request": data.get("direct_request"),
+                "bge_query":      bge_query,
+                "clap_keywords":  clap_keywords,
+                "rejected":       data.get("rejected") or [],
+            }
+            for extra_key in ("found", "continue_from"):
+                if extra_key in data:
+                    result[extra_key] = data[extra_key]
+
+        print(f"[Qwen/{category or '-'}/{specificity or '-'}] "
+              f"direct={result.get('direct_request')} | "
+              f"bge='{result['bge_query'][:60]}' | "
+              f"clap='{result['clap_keywords'][:60]}' | "
+              f"rejected={result.get('rejected', [])}")
+        return result
     except Exception as e:
         print(f"[Qwen] extraction failed ({e}), using heuristic")
+        print(f"[Qwen] raw was: {repr(raw[:200])}")
         return default
+
+
+def _extract_json(raw: str) -> str:
+    """Raw 모델 출력에서 JSON 블록을 추출한다.
+
+    전략 1: <think>...</think> 제거 후 JSON 탐색
+    전략 2: think 제거 후 JSON이 없으면 원본(raw)에서 직접 탐색
+            → JSON이 think 블록 안에 있거나 </think>가 잘린 경우 처리
+    """
+    def _find_json(text: str) -> str:
+        """텍스트에서 첫 번째 {...} 블록을 찾아 반환."""
+        if text.startswith("```"):
+            text = text.split("```")[1]
+            if text.startswith("json"):
+                text = text[4:]
+        text = text.strip()
+        if text.startswith("{"):
+            return text
+        m = re.search(r"\{.*\}", text, re.DOTALL)
+        return m.group() if m else ""
+
+    # 전략 1: 완전한 <think>...</think> 블록 제거 후 JSON 탐색
+    stripped = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
+    result = _find_json(stripped)
+    if result:
+        return result
+
+    # 전략 2: think 제거 후 JSON이 없으면 원본 전체에서 탐색
+    # (JSON이 think 안에 있거나, </think>가 잘려서 제거가 안 된 경우)
+    result = _find_json(raw)
+    return result
 
 
 def _last_user_message(conversation_str: str) -> str:

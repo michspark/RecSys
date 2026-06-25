@@ -1,0 +1,48 @@
+
+── 2026-05-31 23:25:52  model=Qwen/Qwen3-4B  44 cases ──
+  [✓] A-HH  bge='tag_list: boom-bap, deep sub-bass, lo-fi vinyl tex'  clap='heavy basslines, mellow beats, warm viny'  clap_keywords='heavy basslines, mellow beats, warm vinyl crackle, smooth grooves'
+  [✓] A-HL  bge='tag_list: boom-bap, deeper bass, jazzy samples, lo'  clap='mellow beats, deep bass, jazzy samples, '  clap_keywords='mellow beats, deep bass, jazzy samples, laid-back groove'
+  [✓] A-LH  bge='artist_name: Chon | tag_list: Chon, math rock, bounc'  clap='clean guitar, bouncy melody, complex rhy'  clap_keywords='clean guitar, bouncy melody, complex rhythm, upbeat energy' | found=True
+  [⚠] A-LL  bge='tag_list: dark, atmospheric, haunting, intimate | ar'  clap='dark atmosphere, ethereal female voice, '  clap_keywords='dark atmosphere, ethereal female voice, reverb-heavy, slow tempo, immersive soundscape' | continue_from='dark ambient'  ⚠ tag_list was list→joined
+  [⚠] B-HH  bge='artist_name: Green Day | tag_list: same punk energy | '  clap='same punk energy'  lyric_keywords='same punk energy' | phase='exploring'  ⚠ tag_list was list→joined
+  [✓] B-HL  bge='artist_name: Anitta | tag_list: upbeat, dance-focuse'  clap='upbeat, dance-focused'
+  [✓] B-LH  bge='artist_name: Kendrick Lamar | tag_list: watching a m'  clap='watching a movie, vivid personal story, '  lyric_keywords="watching a movie, vivid personal story, specific event in rapper's life" | found=True
+  [✓] B-LL  bge='artist_name: Weezer | tag_list: melancholic, introsp'  clap='introspective, melancholic'  lyric_keywords='introspective, melancholic'
+  [✓] C-HH  bge='tag_list: post-punk, dark wave, 80s, atmospheric, '  clap='cold synths, reverb, brooding atmosphere'  visual_keywords='black background, blurry figure, monochrome, dark, high contrast'
+  [✓] C-HL  bge='tag_list: minimal electronic, UK underground, dark'  clap='minimal electronic beats, rain-soaked am'  visual_keywords='rain-slicked pavement, dark street, neon lights, grainy urban photo'
+  [✓] C-LH  bge='artist_name: The Beatles'  clap='YES! Abbey Road, that's exactly it!'  visual_keywords='four men walking across a zebra crossing, black and white photo, daytime' | found=True
+  [✓] C-LL  bge='tag_list: heavier, experimental, psychedelic, alte'  clap='thicker guitars, driving rhythms, distor'  visual_keywords='colorful, abstract, trippy, psychedelic feeling' | mood_shift='from light/psychedelic to heavier/experimental'
+  [✓] D-HH  bge='artist_name: Queen | tag_list: operatic, rock, drama'  clap='operatic, rock, dramatic'
+  [✓] D-HL  bge='tag_list: dark, contemplative, noir, acoustic, slo'  clap='solo piano, soft piano keys, slow rhythm'
+  [✓] D-LH  bge='artist_name: Lin-Manuel Miranda | album_name: Moana | '  clap='sweeping orchestral, building to a clima'  source='Moana'
+  [✓] D-LL  bge='artist_name: Red Hot Chili Peppers | tag_list: funky'  clap='groovy bass, upbeat drums, energetic rhy'
+  [✓] E-HH  bge='artist_name: Aphex Twin | album_name: Drukqs | tag_lis'  clap='experimental electronic, glitchy, breakc'
+  [✓] E-HL  bge='artist_name: M83 | tag_list: melodic synthpop, dark '  clap='dreamy synths, haunting vocals, pulsing '  journey_stage='middle'
+  [⚠] E-LH  bge='artist_name: Dave Brubeck | tag_list: unusual time s'  clap='5/4 time signature, hypnotic saxophone m'  discovery_phase='applying' | discovered_elements='unusual time signature, hypnotic saxophone melody, rhythmic complexity'  ⚠ tag_list was list→joined; clap_keywords was list→joined
+  [✓] E-LL  bge='tag_list: atmospheric electronic'  clap='atmospheric electronic, immersive sounds'
+  [✓] F-HH  bge='artist_name: Linkin Park | album_name: Hybrid Theory'  clap='nu-metal, alternative rock, Linkin Park,'
+  [✓] F-HL  bge='tag_list: underground house late 90s heavy basslin'  clap='heavy basslines, atmospheric textures, 9'  era_locked='late 90s'
+  [✓] F-LH  bge='artist_name: Roy Ayers | tag_list: 70s jazz-funk, vi'  clap='laid-back groove, vibraphone melody, fun'  found=True | instrument_focus='vibraphone'
+  [✓] F-LL  bge='tag_list: jazz, piano solos, exceptional'  clap='deep piano chords, reflective, solo spot'
+  [✓] G-HH  bge='artist_name: Nothing But Thieves | tag_list: acousti'  clap='acoustic, piano, rock, melancholic, raw '
+  [✓] G-HL  bge='tag_list: profound sadness, resilient determinatio'  clap='powerful vocals building to a climactic '  emotional_core='resilient sorrow'
+  [✓] G-LH  bge='artist_name: Switchblade Symphony | tag_list: dark, '  clap='haunting atmosphere, ethereal voice, slo'  found=True
+  [✓] G-LL  bge='tag_list: encouraging, hopeful, persevering, Chris'  clap='uplifting melody, strong vocal delivery,'  mood_label='inspiring'
+  [⚠] H-HH  bge='artist_name: Weird Al Yankovic | tag_list: comedy, p'  clap='comedy, parody, novelty'  same_artist_mode=True  ⚠ tag_list was list→joined
+  [✓] H-HL  bge='artist_name: Green Day | tag_list: mature, American '  clap='arena rock, polished production, anthemi'
+  [✓] H-LH  bge='artist_name: VNV Nation | tag_list: electronic, powe'  clap='driving synth bass, soaring pads, epic b'  found=True
+  [✓] H-LL  bge='tag_list: K-Pop girl groups, 2013-2016'  clap='powerful, punchy'  locked_direction='locked_genre'
+  [✓] I-HH  bge='tag_list: African | tag_list: African, rock, 80s, ex'  clap='African, rock, 80s, exotic, continental'  culture_region='African'
+  [✓] I-HL  bge='artist_name: Stan Getz | tag_list: Brazilian | tag_lis'  clap='Brazilian, bossa nova, samba influence, '  culture_region='Brazilian'
+  [✓] I-LH  bge='artist_name: Shakira | tag_list: Latin | tag_list: Spa'  clap='Spanish, tropical beat, catchy chorus, L'  culture_region='Latin' | found=True
+  [✓] I-LL  bge='tag_list: Africa, Latin America | tag_list: African,'  clap='African, Latin, high-energy, rhythmic'  culture_region='Africa, Latin America'
+  [✓] J-HH  bge='artist_name: Nirvana | tag_list: grunge, 90s, highly'  clap='grunge, 90s, highly popular, Nirvana, ic'
+  [✓] J-HL  bge='artist_name: Waylon Jennings | tag_list: outlaw coun'  clap='raw twangy guitar, deep male vocals, reb'  niche_community='outlaw country'
+  [✓] J-LH  bge='artist_name: Nas | tag_list: early 90s, big hit, hip'  clap='early 90s, big hit, hip-hop, hard beat, '  popularity_era='early 90s'
+  [✓] J-LL  bge='tag_list: 90s, pop, popular, party songs, nostalgi'  clap='90s, pop, popular, party songs, nostalgi'  popularity_era='90s'
+  [✓] K-HH  bge='tag_list: 1995, East Coast hip-hop, defining track'  clap='1995, East Coast hip-hop, defining track'  target_year='1995'
+  [✓] K-HL  bge='artist_name: The Black Keys | tag_list: Black Keys, '  clap='mellow blues guitar, late-night atmosphe'
+  [✓] K-LH  bge='artist_name: Mobb Deep | tag_list: 90s, East Coast h'  clap='90s boom-bap production, hard drums, gri'  era_anchor='90s'
+  [✓] K-LL  bge='tag_list: contemporary classical, ambient, atmosph'  clap='atmospheric melodies, emotional depth, m'  browse_mode='fully_open'
+── done: ✓40  ⚠4  ✗0 ──
+
