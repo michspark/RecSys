@@ -1,6 +1,6 @@
-"""Category H extraction prompts — 정확한 곡 재생 / 아티스트+서브장르 탐색 / 스타일로 기억 찾기 / 열린 탐색."""
+"""Category H extraction prompts — exact song playback / artist+subgenre exploration / recall by style / open exploration."""
 
-# H-HH (14세션): 정확한 곡 재생 요청
+# H-HH (14 sessions): request to play an exact song
 PROMPT_HH = """You are extracting exact track requests from a music conversation.
 
 The user requests SPECIFIC songs by exact title and artist.
@@ -50,7 +50,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# H-HL (48세션): 아티스트 디스코그래피/서브장르 탐색
+# H-HL (48 sessions): artist discography / subgenre exploration
 PROMPT_HL = """You are extracting artist/subgenre exploration keywords from a music conversation.
 
 The user is systematically exploring a specific artist's catalog OR a narrow
@@ -108,7 +108,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# H-LH (39세션): 기억 속 아티스트/곡 찾기
+# H-LH (39 sessions): finding a remembered artist / song
 PROMPT_LH = """You are helping identify a specific artist or song from vague style descriptions.
 
 The user remembers an artist or song by HOW IT SOUNDS or FEELS,
@@ -163,7 +163,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# H-LL (34세션): 넓은 범위 음악 탐색
+# H-LL (34 sessions): broad music exploration
 PROMPT_LL = """You are extracting open-ended music discovery keywords from a conversation.
 
 The user started with broad exploration and their preferences are EMERGING
@@ -216,18 +216,18 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_HL,  # H에서 specificity 미상이면 HL (48세션으로 최다)
+    "default": PROMPT_HL,  # Unknown specificity in H -> HL (most common, 48 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict, specificity: str) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
 
     if specificity == "HH":
-        # 아티스트가 절대적 앵커 — album_name도 포함
+        # Artist is the hard anchor — include album_name too
         if data.get("artist_name"):
             parts.append(f"artist_name: {data['artist_name']}")
         if data.get("album_name"):
@@ -236,17 +236,17 @@ def _build_bge_query(data: dict, specificity: str) -> str:
             parts.append(f"tag_list: {data['tag_list']}")
 
     elif specificity == "HL":
-        # wants_different_artist이면 아티스트명 제외
+        # Drop the artist name if wants_different_artist
         if data.get("artist_name") and not data.get("wants_different_artist"):
             parts.append(f"artist_name: {data['artist_name']}")
-        # anchor_subgenre를 tag_list 앞에 별도 행으로 추가해 메타데이터 매칭 강화
+        # Add anchor_subgenre as a separate line before tag_list to strengthen metadata matching
         if data.get("anchor_subgenre"):
             parts.append(f"tag_list: {data['anchor_subgenre']}")
         if data.get("tag_list"):
             parts.append(f"tag_list: {data['tag_list']}")
 
     elif specificity == "LH":
-        # 누적 단서 + identity_clues를 별도 행으로
+        # Accumulated clues + identity_clues on separate lines
         if data.get("artist_name"):
             parts.append(f"artist_name: {data['artist_name']}")
         if data.get("tag_list"):
@@ -264,12 +264,12 @@ def _build_bge_query(data: dict, specificity: str) -> str:
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data, specificity) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
     attr_query    = data.get("tag_list") or fallback
 
-    # H-HH: same_artist_mode일 때 artist_name만으로 BGE 강화 신호
+    # H-HH: in same_artist_mode, artist_name alone boosts BGE
     same_artist_boost = (
         specificity == "HH"
         and bool(data.get("same_artist_mode"))
@@ -284,7 +284,7 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "rejected":          data.get("rejected") or [],
         "same_artist_boost": same_artist_boost,
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "same_artist_mode", "frustrated",
                 "exploration_axis", "anchor_subgenre", "wants_different_artist",
                 "post_found_mode", "identity_clues",

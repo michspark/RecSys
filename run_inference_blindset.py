@@ -9,7 +9,6 @@ import argparse
 from mcrs import load_crs_baseline
 from datasets import load_dataset
 from tqdm import tqdm
-from typing import List, Dict, Any, Tuple
 import pandas as pd
 from omegaconf import OmegaConf
 
@@ -34,7 +33,6 @@ def chat_history_parser(conversations, music_crs, target_turn_number):
     df_history = df_conversation[df_conversation['turn_number'] < target_turn_number] # Filters out the "future". It only keeps messages that happened before the target turn.
     chat_history = []
     for turn_data in df_history.to_dict(orient="records"):
-        turn_number = turn_data['turn_number']
         current_role = turn_data['role']
         current_content = turn_data['content']
         if turn_data['role'] == "music":
@@ -49,14 +47,14 @@ def chat_history_parser(conversations, music_crs, target_turn_number):
     return chat_history, user_query
 
 def compute_anchor_info(conversations, assessments, target_turn_number, anchor_feedback):
-    """anchor_cf 검색기에 넘길 (anchor_track_id, positive_track_ids, exclude_ids) 계산.
+    """Compute (anchor_track_id, positive_track_ids, exclude_ids) for the anchor_cf retrievers.
 
-    - exclude_ids: target 이전에 추천된 모든 music 트랙(중복 추천 방지, 라벨 불필요).
-    - anchor_feedback=True : positive = goal_progress_assessment가 MOVES_TOWARD_GOAL인 턴의 music,
-                             anchor = 그중 마지막 (오라클 라벨, devset 재현용).
-    - anchor_feedback=False: positive = 과거 모든 music, anchor = 직전 추천 트랙 (라벨 불필요, blindset용).
+    - exclude_ids: every music track recommended before the target (avoids repeats, no labels needed).
+    - anchor_feedback=True : positives = music from turns labeled MOVES_TOWARD_GOAL,
+                             anchor = the last of them (oracle labels, devset only).
+    - anchor_feedback=False: positives = all past music, anchor = the previous track (no labels, blindset).
     """
-    # 턴 번호 → 그 턴에 추천된 music 트랙 ID
+    # turn number -> music track ID recommended at that turn
     turn_to_music = {turn['turn_number']: turn['content']
                      for turn in conversations if turn['role'] == 'music'}
     feedback = {a['turn_number']: (a.get('goal_progress_assessment') == 'MOVES_TOWARD_GOAL')
@@ -71,7 +69,7 @@ def compute_anchor_info(conversations, assessments, target_turn_number, anchor_f
         is_positive = feedback.get(turn_number, False) if anchor_feedback else True
         if is_positive:
             positive_ids.append(track_id)
-            anchor_id = track_id   # 마지막 (긍정) 트랙으로 갱신
+            anchor_id = track_id   # keep the latest (positive) track
     return anchor_id, positive_ids, exclude_ids
 
 def main(args):
@@ -115,7 +113,7 @@ def main(args):
         reranker=getattr(config, "reranker", None),
     )
     db = load_dataset(config.test_dataset_name, split="test")
-    # anchor_cf 검색기용: blindset은 goal_progress 라벨이 없으므로 기본 False
+    # anchor_cf retrievers: blindset has no goal_progress labels, so default False
     anchor_feedback = getattr(config, "anchor_feedback", False)
     # Prepare all batch data at once
     batch_data, metadata = [], []
@@ -123,9 +121,9 @@ def main(args):
         user_id = item['user_id']
         session_id = item['session_id']
         assessments = item.get('goal_progress_assessments', [])
-        # blind set은 각 item의 마지막 conversation 턴이 예측 대상이다.
+        # In the blind set, the last conversation turn of each item is the prediction target.
         target_turn_number = item['conversations'][-1]['turn_number']
-        # devset 파이프라인과 동일하게: music 트랙 ID를 메타데이터로 변환하고 target 이전만 history로 사용
+        # As in the devset pipeline: convert music track IDs to metadata and use only turns before the target as history
         chat_history, user_query = chat_history_parser(item['conversations'], music_crs, target_turn_number)
         anchor_id, positive_ids, exclude_ids = compute_anchor_info(
             item['conversations'], assessments, target_turn_number, anchor_feedback

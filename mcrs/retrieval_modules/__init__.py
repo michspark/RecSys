@@ -19,7 +19,7 @@ def load_retrieval_module(
     elif retrieval_type == "bge":
         return BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
     elif retrieval_type == "anchor_cf":
-        # BGE 누적쿼리 + anchor 메타 + cf-bpr(beta) 융합
+        # BGE cumulative query + anchor metadata + cf-bpr (beta) fusion
         bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
         return ANCHOR_CF_MODEL(
             bge_model=bge_model,
@@ -30,7 +30,7 @@ def load_retrieval_module(
             alpha_cap=kwargs.get("alpha_cap", 0.60),
         )
     elif retrieval_type == "anchor_bge_bm25_cf":
-        # anchor_cf(best) + BM25 sparse 채널을 RRF 순위융합으로 결합
+        # anchor_cf + BM25 sparse channel, combined with RRF rank fusion
         bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
         bm25_model = BM25_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)
         return ANCHOR_BGE_BM25_CF_MODEL(
@@ -43,8 +43,8 @@ def load_retrieval_module(
             alpha_cap=kwargs.get("alpha_cap", 0.60),
             bm25_topk=kwargs.get("bm25_topk", 150),
             dense_pool=kwargs.get("dense_pool", 200),
-            rrf_k=kwargs.get("rrf_k", 60),               # 기본 60(이전 상태). k=10 쓰려면 명시 전달
-            rerank_weights=kwargs.get("rerank_weights"),  # 기본 off(None→{}). 켜려면 가중치 명시 전달
+            rrf_k=kwargs.get("rrf_k", 60),               # default 60; pass explicitly to use k=10
+            rerank_weights=kwargs.get("rerank_weights"),  # off by default (None -> {}); pass weights to enable
         )
     elif retrieval_type == "hybrid":
         bge_model = BGE_MODEL(dataset_name, track_split_types, corpus_types, cache_dir)

@@ -12,7 +12,7 @@ lm_model:
   top_p: 0.9
   max_new_tokens: 128
   system_prompt: "natural"          # "natural" swaps the checklist response_generation block
-retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse 채널을 RRF로 융합 (best 검색기)
+retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse channel fused with RRF (best retriever)
 test_dataset_name: "talkpl-ai/TalkPlayData-Challenge-Dataset"
 item_db_name: "talkpl-ai/TalkPlayData-Challenge-Track-Metadata"
 user_db_name: "talkpl-ai/TalkPlayData-Challenge-User-Metadata"
@@ -28,17 +28,15 @@ corpus_types:
   - "tag_list"
 cache_dir: "./cache"
 device: "cuda"
-# anchor_cf 전용: 긍정 판정에 goal_progress_assessment 라벨 사용(devset 재현). blindset은 false.
+# anchor_cf only: use goal_progress_assessment labels to pick positive tracks (devset). Must be false on blindset.
 anchor_feedback: true
-# LLM reranker. 24GB GPU에서는 in-pipeline rerank가 OOM(상주 ~23GB)이라 2-pass로 분리:
-#   pass1 = 이 설정(enabled:false)으로 run_inference_devset.py → retrieval top-50 덤프 + version A.
-#   pass2 = rerank_devset.py가 Qwen3-8B만 올려 enabled:true로 rerank → version B.
-# 따라서 여기서는 enabled:false 유지(in-pipeline rerank off). rerank_devset.py가 아래 값을 읽어 켠다.
+# LLM reranker. In-pipeline reranking OOMs on a 24GB GPU (~23GB resident), so it stays off here;
+# run_inference_devset.py still dumps the pre-rerank top-50 pool for a separate rerank pass.
 reranker:
-  enabled: false                    # in-pipeline은 off (OOM 회피). pass2 스크립트가 강제로 켬.
+  enabled: false                    # off in-pipeline to avoid OOM
   type: "llm"                       # llm | none
-  n_candidates: 50                  # retrieval에서 받아 재정렬할 후보 수
-  topk: 20                          # 최종 제출 수 (eval은 ndcg@20까지)
-  temperature: 0.3                  # reranking 일관성 (응답생성 0.8과 분리)
-  max_new_tokens: 128               # 번호 20개면 충분
-  reuse_response_llm: true          # 문서용: 코드는 항상 self.lm 재사용
+  n_candidates: 50                  # number of retrieval candidates to rerank
+  topk: 20                          # final list size (eval goes up to nDCG@20)
+  temperature: 0.3                  # low temperature for stable reranking (separate from response 0.8)
+  max_new_tokens: 128               # enough for 20 indices
+  reuse_response_llm: true          # informational only: the code always reuses self.lm

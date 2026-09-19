@@ -1,6 +1,6 @@
-"""Category D extraction prompts — 정확한 곡 요청 / 분위기 탐색 / OST 찾기."""
+"""Category D extraction prompts — exact song requests / mood exploration / finding OSTs."""
 
-# D-HH: 정확한 곡/아티스트 요청
+# D-HH: exact song / artist request
 PROMPT_HH = """You are extracting exact track identification keywords from a music conversation.
 
 The user is requesting specific songs by title and/or artist,
@@ -43,7 +43,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# D-HL: 특정 분위기의 여러 곡 탐색
+# D-HL: exploring several songs with a specific mood
 PROMPT_HL = """You are extracting mood and atmosphere keywords for a themed music session.
 
 The user wants multiple tracks that fit a SPECIFIC mood, setting, or thematic context.
@@ -91,7 +91,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# D-LH: 기억 속 OST/영화 곡 찾기
+# D-LH: finding a remembered OST / movie song
 PROMPT_LH = """You are helping find a specific soundtrack track the user remembers.
 
 The user has a song from a movie, game, or TV show in mind but can't recall
@@ -139,7 +139,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# D-LL: 아티스트 자유 탐색
+# D-LL: open-ended artist exploration
 PROMPT_LL = """You are extracting artist exploration keywords for casual music discovery.
 
 The user is casually exploring a specific artist's music across different
@@ -186,19 +186,19 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_HL,  # D에서 specificity 미상이면 HL이 가장 무난 (28세션으로 최다)
+    "default": PROMPT_HL,  # Unknown specificity in D -> HL (most common, 28 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict, specificity: str) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
     if specificity == "LH" and data.get("source"):
-        # OST는 소스명(영화/게임명)이 메타데이터에 포함될 가능성 높음
+        # For OSTs the source title (movie/game) is likely present in the metadata
         parts.append(f"album_name: {data['source']}")
     if data.get("tag_list"):
         parts.append(f"tag_list: {data['tag_list']}")
@@ -206,7 +206,7 @@ def _build_bge_query(data: dict, specificity: str) -> str:
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data, specificity) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
     attr_query    = data.get("tag_list") or fallback
@@ -218,7 +218,7 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "attr_query":     attr_query,
         "rejected":       data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "source", "wants_different_source",
                 "wants_different_artist", "frustrated", "refinement", "vibe_label"):
         if key in data:

@@ -8,7 +8,7 @@ Outputs overall scores + per-category + per-specificity + per-(category, specifi
 
 import os
 import json
-from typing import List, Dict, Any
+from typing import List, Dict
 from datasets import load_dataset
 from metrics import compute_recsys_metrics, compute_lexical_diversity, compute_catalog_diversity
 from tqdm import tqdm
@@ -29,9 +29,9 @@ def df_filtering(df, session_id, turn_number):
 
 
 def compute_gt_rank(predicted_track_ids: List[str], ground_truth_id: str) -> int:
-    """GT 트랙이 예측 리스트에서 몇 번째에 있는지 반환 (1-indexed).
+    """Return the 1-indexed rank of the GT track in the predicted list.
 
-    리스트에 없으면 len(predicted_track_ids) + 1 반환.
+    Returns len(predicted_track_ids) + 1 if it is not in the list.
     """
     try:
         return predicted_track_ids.index(ground_truth_id) + 1
@@ -40,7 +40,7 @@ def compute_gt_rank(predicted_track_ids: List[str], ground_truth_id: str) -> int
 
 
 def aggregate_group(rows: List[Dict]) -> Dict:
-    """row 리스트에서 ndcg 평균과 gt_rank 평균을 계산."""
+    """Compute mean nDCG and mean gt_rank over a list of rows."""
     if not rows:
         return {}
     keys = [k for k in rows[0] if k not in ("session_id", "turn_number", "category", "specificity")]
@@ -56,7 +56,7 @@ def main(args) -> None:
     df_predictions  = pd.DataFrame(predictions)
     df_ground_truth = pd.DataFrame(ground_truth)
 
-    # 데이터셋에서 session_id → (category, specificity) 매핑 로드
+    # Load the session_id -> (category, specificity) mapping from the dataset
     print("Loading dataset for category/specificity labels...")
     db = load_dataset("talkpl-ai/TalkPlayData-Challenge-Dataset", split="test")
     session_to_cat: Dict[str, str] = {}
@@ -95,7 +95,7 @@ def main(args) -> None:
             **recsys_metrics,
         })
 
-    # ── 전체 평균 (기존 방식 유지) ─────────────────────────────────────────────
+    # ── Overall mean ─────────────────────────────────────────────────────────
     df_results          = pd.DataFrame(results)
     df_turn_wise        = df_results.drop(columns=["session_id", "category", "specificity"]).groupby("turn_number").mean()
     overall             = df_turn_wise.mean(axis=0).to_dict()
@@ -106,22 +106,21 @@ def main(args) -> None:
     overall["lexical_diversity"] = compute_lexical_diversity(list_of_responses)
     overall["total_catalog_size"] = total_catalog_size
 
-    # ── category별 ────────────────────────────────────────────────────────────
+    # ── Per category ─────────────────────────────────────────────────────────
     by_category: Dict[str, Dict] = {}
     for cat, group in df_results.groupby("category"):
-        rows = group.drop(columns=["session_id", "category", "specificity"]).to_dict(orient="records")
         agg  = {k: round(float(group[k].mean()), 6) for k in ["gt_rank", "ndcg@1", "ndcg@10", "ndcg@20"]}
         agg["count"] = len(group["session_id"].unique())
         by_category[cat] = agg
 
-    # ── specificity별 ─────────────────────────────────────────────────────────
+    # ── Per specificity ──────────────────────────────────────────────────────
     by_specificity: Dict[str, Dict] = {}
     for spec, group in df_results.groupby("specificity"):
         agg  = {k: round(float(group[k].mean()), 6) for k in ["gt_rank", "ndcg@1", "ndcg@10", "ndcg@20"]}
         agg["count"] = len(group["session_id"].unique())
         by_specificity[spec] = agg
 
-    # ── (category, specificity) 조합별 ────────────────────────────────────────
+    # ── Per (category, specificity) ──────────────────────────────────────────
     by_cat_spec: Dict[str, Dict] = {}
     for (cat, spec), group in df_results.groupby(["category", "specificity"]):
         key  = f"{cat}_{spec}"
@@ -129,7 +128,7 @@ def main(args) -> None:
         agg["count"] = len(group["session_id"].unique())
         by_cat_spec[key] = agg
 
-    # ── 저장 ──────────────────────────────────────────────────────────────────
+    # ── Save ─────────────────────────────────────────────────────────────────
     output = {
         "overall":                overall,
         "by_category":            by_category,
@@ -143,7 +142,7 @@ def main(args) -> None:
         json.dump(output, f, indent=2, ensure_ascii=False)
     print(f"Saved → {out_path}")
 
-    # 터미널에 요약 출력
+    # Print a summary to the terminal
     print(f"\n── Overall ──")
     for k in ["ndcg@1", "ndcg@10", "ndcg@20", "catalog_diversity", "lexical_diversity"]:
         print(f"  {k}: {overall[k]:.4f}")

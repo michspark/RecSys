@@ -183,7 +183,7 @@ class CRS_BASELINE:
 
         # Stage 1: Batch retrieval
         if getattr(self.retrieval, 'accepts_anchor', False):
-            # anchor 기반 검색기(ANCHOR_CF_MODEL): pipeline이 anchor 정보를 주입한다.
+            # Anchor-based retrievers (ANCHOR_CF_MODEL etc.): the pipeline injects anchor info.
             anchor_track_ids = [data.get('anchor_track_id') for data in batch_data]
             positive_track_ids = [data.get('positive_track_ids') for data in batch_data]
             exclude_ids_list = [data.get('exclude_ids') for data in batch_data]

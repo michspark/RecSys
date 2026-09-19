@@ -8,7 +8,6 @@ from collections.abc import Collection
 from typing import Any, Optional
 
 import numpy as np
-from scipy import linalg
 
 
 def get_ndcg(gold, preds, k: int) -> float:

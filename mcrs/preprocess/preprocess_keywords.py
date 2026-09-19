@@ -76,11 +76,11 @@ def main():
     parser.add_argument("--dataset", default="talkpl-ai/TalkPlayData-Challenge-Dataset")
     parser.add_argument("--item_db", default="talkpl-ai/TalkPlayData-Challenge-Track-Metadata")
     parser.add_argument("--split",   default="test")
-    # category/specificity 필드명은 데이터셋 컬럼명에 따라 다를 수 있음
+    # Column names for category/specificity may differ between datasets
     parser.add_argument("--cat_field",  default="category",
-                        help="데이터셋에서 category를 담은 컬럼명")
+                        help="Dataset column that holds the category")
     parser.add_argument("--spec_field", default="specificity",
-                        help="데이터셋에서 specificity를 담은 컬럼명")
+                        help="Dataset column that holds the specificity")
     args = parser.parse_args()
 
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -97,7 +97,7 @@ def main():
     print(f"Loading dataset {args.dataset} split={args.split}...")
     db = load_dataset(args.dataset, split=args.split)
 
-    # run_inference_devset.py와 동일한 방식으로 category/specificity 읽기:
+    # Read category/specificity the same way run_inference_devset.py does:
     # item['conversation_goal']['category'] / item['conversation_goal']['specificity']
     sample_item = db[0]
     has_conv_goal = "conversation_goal" in sample_item
@@ -126,7 +126,7 @@ def main():
                     item["conversations"], item_db, turn_number
                 )
             except (IndexError, KeyError):
-                # 턴 수가 8 미만인 세션은 조용히 건너뜀
+                # Silently skip sessions with fewer than 8 turns
                 break
 
             retrieval_input = _build_retrieval_input(chat_history, user_query)
@@ -138,7 +138,7 @@ def main():
 
     print(f"Total unique (category, specificity, query) pairs: {len(entries)}")
 
-    # 기존 캐시 파일이 있으면 로드해서 이어쓰기 (재시작 복구용)
+    # Resume from an existing cache file if present
     os.makedirs(os.path.dirname(args.output) or ".", exist_ok=True)
     if os.path.exists(args.output):
         with open(args.output, "r", encoding="utf-8") as f:
@@ -150,7 +150,7 @@ def main():
 
     skipped = 0
     for key, retrieval_input, category, specificity in tqdm(entries, desc="Extracting"):
-        # 이미 캐시에 있으면 스킵 (중단 후 재시작 시 처음부터 다시 안 해도 됨)
+        # Skip entries already cached so an interrupted run can resume
         if key in cache:
             skipped += 1
             continue

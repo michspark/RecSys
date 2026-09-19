@@ -1,6 +1,6 @@
-"""Category F extraction prompts — 정확한 버전 찾기 / 장르+시대 탐색 / 기억 속 곡 / 장르 자유 탐색."""
+"""Category F extraction prompts — exact version lookup / genre+era exploration / remembered songs / open genre exploration."""
 
-# F-HH: 정확한 곡/앨범/버전 찾기
+# F-HH: finding an exact song / album / version
 PROMPT_HH = """You are extracting exact track identification from a music conversation.
 
 The user is looking for a SPECIFIC song, often from a specific album or version.
@@ -48,7 +48,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# F-HL: 장르+시대 내 여러 곡
+# F-HL: several songs within a genre + era
 PROMPT_HL = """You are extracting genre-era specific search keywords from a music conversation.
 
 The user is deep-diving into a SPECIFIC genre + time period combination,
@@ -105,7 +105,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# F-LH: 기억 속 곡 찾기 (장르/시대 단서 + 가사)
+# F-LH: finding a remembered song (genre/era clues + lyrics)
 PROMPT_LH = """You are helping find a specific track the user remembers,
 using genre, era, and sometimes lyrical/thematic clues.
 
@@ -160,7 +160,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# F-LL: 장르 자유 탐색
+# F-LL: open-ended genre exploration
 PROMPT_LL = """You are extracting broad genre exploration keywords from a music conversation.
 
 The user is casually exploring a genre's range — different moods,
@@ -211,18 +211,18 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_HL,  # F에서 specificity 미상이면 HL (32세션으로 최다)
+    "default": PROMPT_HL,  # Unknown specificity in F -> HL (most common, 32 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict, specificity: str) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
 
     if specificity == "HH":
-        # 정확한 매칭: 아티스트 + 앨범 + 태그
+        # Exact match: artist + album + tags
         if data.get("artist_name"):
             parts.append(f"artist_name: {data['artist_name']}")
         if data.get("album_name"):
@@ -231,19 +231,19 @@ def _build_bge_query(data: dict, specificity: str) -> str:
             parts.append(f"tag_list: {data['tag_list']}")
 
     elif specificity == "HL":
-        # 장르+시대 고정: tag_list에 genre+era+refinement가 이미 합쳐져 있음
+        # Fixed genre + era: tag_list already merges genre + era + refinement
         if data.get("artist_name"):
             parts.append(f"artist_name: {data['artist_name']}")
         if data.get("tag_list"):
             parts.append(f"tag_list: {data['tag_list']}")
 
     elif specificity == "LH":
-        # 기억 속 곡: 누적 단서 전부 + 악기 포커스
+        # Remembered song: all accumulated clues + instrument focus
         if data.get("artist_name"):
             parts.append(f"artist_name: {data['artist_name']}")
         if data.get("tag_list"):
             parts.append(f"tag_list: {data['tag_list']}")
-        # instrument_focus가 있으면 별도 tag_list 행으로 추가
+        # Add instrument_focus as a separate tag_list line if present
         if data.get("instrument_focus"):
             parts.append(f"tag_list: {data['instrument_focus']}")
 
@@ -257,20 +257,20 @@ def _build_bge_query(data: dict, specificity: str) -> str:
 
 
 def _build_attr_query(data: dict, specificity: str) -> str:
-    """attributes-qwen3 임베딩 검색용 쿼리 구성."""
+    """Build the query for attributes-qwen3 embedding search."""
     if specificity == "HL" and data.get("sub_refinement"):
-        # refinement이 있으면 그걸 앞에 배치해 attr 검색에서 현재 방향을 강조
+        # Put refinement first to emphasize the current direction in attr search
         return f"{data['sub_refinement']}, {data.get('tag_list', '')}"
     return data.get("tag_list") or ""
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data, specificity) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
     attr_query    = _build_attr_query(data, specificity) or fallback
 
-    # F-LH: lyric_keywords가 있으면 lyrics-qwen3 검색에 활용
+    # F-LH: use lyric_keywords for lyrics-qwen3 search when present
     lyrics_query = data.get("lyric_keywords") if specificity == "LH" else None
 
     result = {
@@ -281,7 +281,7 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "lyrics_query":   lyrics_query,
         "rejected":       data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "album_name", "scope", "version_info",
                 "era_locked", "genre_locked", "sub_refinement",
                 "instrument_focus", "base_genre", "exploration_facet"):

@@ -31,16 +31,16 @@ def extract_structured_query(conversation_str: str, lm_components=None,
 
     model, tokenizer, device = lm_components
     try:
-        # Category+specificity별 전용 프롬프트 선택 (placeholder 채우기)
+        # Pick the category/specificity-specific prompt and fill its placeholders
         prompt_template = get_prompt(category, specificity)
         system_prompt = prompt_template.format(
             last_user_msg=last_user_msg,
             conversation_str=conversation_str,
         ) if "{last_user_msg}" in prompt_template else prompt_template
 
-        # default.PROMPT는 placeholder가 없으므로 user_content에 직접 넣음
+        # default.PROMPT has no placeholders, so the conversation goes in as-is
         if "{last_user_msg}" in prompt_template:
-            user_content = ""  # 이미 system_prompt에 포함됨
+            user_content = ""  # already included in system_prompt
         else:
             user_content = (
                 f"[LAST USER MESSAGE]\n{last_user_msg}\n\n"
@@ -91,12 +91,12 @@ def extract_structured_query(conversation_str: str, lm_components=None,
 
         # track_name: Blue in Green, artist_name: Miles Davis, tag_list: jazz, cool jazz, mellow
 
-        # 카테고리 전용 빌더가 있으면 우선 사용 (bge_query / clap_keywords 구성 방식이 다름)
+        # Prefer the category-specific builder (it builds bge_query / clap_keywords differently)
         builder = get_result_builder(category)
         if builder:
             result = builder(data, specificity or "", fallback_query)
         else:
-            # 범용 빌더: artist_name + tag_list → bge_query, clap_keywords 필드 우선
+            # Generic builder: artist_name + tag_list -> bge_query; explicit clap_keywords take priority
             bge_parts = []
             if data.get("artist_name"):
                 bge_parts.append(f"artist_name: {data['artist_name']}")
@@ -132,14 +132,14 @@ def extract_structured_query(conversation_str: str, lm_components=None,
 
 
 def _extract_json(raw: str) -> str:
-    """Raw 모델 출력에서 JSON 블록을 추출한다.
+    """Extract the JSON block from raw model output.
 
-    전략 1: <think>...</think> 제거 후 JSON 탐색
-    전략 2: think 제거 후 JSON이 없으면 원본(raw)에서 직접 탐색
-            → JSON이 think 블록 안에 있거나 </think>가 잘린 경우 처리
+    Strategy 1: strip <think>...</think>, then search for JSON.
+    Strategy 2: if nothing is found, search the raw output
+    (handles JSON inside the think block or a truncated </think>).
     """
     def _find_json(text: str) -> str:
-        """텍스트에서 첫 번째 {...} 블록을 찾아 반환."""
+        """Return the first {...} block in the text."""
         if text.startswith("```"):
             text = text.split("```")[1]
             if text.startswith("json"):
@@ -150,14 +150,14 @@ def _extract_json(raw: str) -> str:
         m = re.search(r"\{.*\}", text, re.DOTALL)
         return m.group() if m else ""
 
-    # 전략 1: 완전한 <think>...</think> 블록 제거 후 JSON 탐색
+    # Strategy 1: strip complete <think>...</think> blocks, then search
     stripped = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
     result = _find_json(stripped)
     if result:
         return result
 
-    # 전략 2: think 제거 후 JSON이 없으면 원본 전체에서 탐색
-    # (JSON이 think 안에 있거나, </think>가 잘려서 제거가 안 된 경우)
+    # Strategy 2: fall back to the raw output
+    # (JSON inside the think block, or </think> truncated so stripping failed)
     result = _find_json(raw)
     return result
 
@@ -170,8 +170,3 @@ def _last_user_message(conversation_str: str) -> str:
         if line.startswith("user:"):
             last = line[5:].strip()
     return last if last else conversation_str[:200]
-
-
-# Kept for backwards compatibility
-def extract_keyword_query(conversation_str: str, lm_components=None) -> str:
-    return extract_structured_query(conversation_str, lm_components)["clap_keywords"]

@@ -4,13 +4,13 @@
 # via evaluate_devset.py, since blindset has no local scoring. tid = gpt54_e_bge_bm25_cf_devset.
 lm_model:
   version: "api"                    # "api" = OPENAI_MODEL (remote); "v2" = local Qwen3-8B (method E)
-  model_name: "gpt-5.4"             # ⚠️ 실제 OpenAI 모델 ID로 맞출 것 (코드는 이 문자열을 그대로 API에 전달)
+  model_name: "gpt-5.4"             # must be a real OpenAI model ID (passed to the API verbatim)
   temperature: 0.8
-  max_new_tokens: 128               # API에는 max_tokens로 전달됨
-  system_prompt: "natural"          # checklist 블록을 NATURAL_RESPONSE_PROMPT로 교체
-  frequency_penalty: 0.4            # LexDiv↑용. 효과 분리 측정 시 0.0 ↔ 0.4 토글
+  max_new_tokens: 128               # sent to the API as max_tokens
+  system_prompt: "natural"          # replace the checklist block with NATURAL_RESPONSE_PROMPT
+  frequency_penalty: 0.4            # raises LexDiv; toggle 0.0 <-> 0.4 to isolate its effect
   presence_penalty: 0.0
-retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse 채널을 RRF로 융합 (best 검색기)
+retrieval_type: "anchor_bge_bm25_cf"   # anchor_cf + BM25 sparse channel fused with RRF (best retriever)
 test_dataset_name: "talkpl-ai/TalkPlayData-Challenge-Dataset"
 item_db_name: "talkpl-ai/TalkPlayData-Challenge-Track-Metadata"
 user_db_name: "talkpl-ai/TalkPlayData-Challenge-User-Metadata"
@@ -26,11 +26,11 @@ corpus_types:
   - "tag_list"
 cache_dir: "./cache"
 device: "cuda"
-# anchor_cf 전용: 긍정 판정에 goal_progress_assessment 라벨 사용(devset 재현). blindset은 false.
+# anchor_cf only: use goal_progress_assessment labels to pick positive tracks (devset). Must be false on blindset.
 anchor_feedback: true
-# LLM reranker는 API 백엔드에선 쓸 수 없음(logit 접근 불가) → 반드시 off 유지.
+# The LLM reranker needs logits, which the API backend cannot provide -> keep it off.
 reranker:
-  enabled: false                     # api 백엔드 + 로컬 LexDiv 측정용 (retrieval 그대로 = version A)
+  enabled: false                     # keep retrieval order (version A)
   type: "llm"
   method: "pointwise"
   n_candidates: 20

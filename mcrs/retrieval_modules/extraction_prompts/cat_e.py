@@ -1,6 +1,6 @@
-"""Category E extraction prompts — 기술적 매칭 / 음악 여정 / 취향 발견 / 자유 탐색."""
+"""Category E extraction prompts — technical matching / musical journey / taste discovery / open exploration."""
 
-# E-HH: 정확한 기술적 특성 매칭
+# E-HH: exact technical-characteristic matching
 PROMPT_HH = """You are extracting precise technical music characteristics from a conversation.
 
 The user is searching for tracks with EXACT technical properties:
@@ -46,7 +46,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# E-HL: 음악적 여정 (장르 프로그레션)
+# E-HL: musical journey (genre progression)
 PROMPT_HL = """You are tracking a PLANNED musical journey across turns.
 
 The user wants to progressively move through musical styles,
@@ -98,7 +98,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# E-LH: 취향 자기 발견 (가장 많은 패턴, 44세션)
+# E-LH: self-discovery of taste (most common pattern, 44 sessions)
 PROMPT_LH = """You are helping a user discover WHAT they like about music.
 
 The user started with a song they love but couldn't explain WHY.
@@ -154,7 +154,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# E-LL: 자유 탐색, 새 음악 발견
+# E-LL: open exploration, discovering new music
 PROMPT_LL = """You are extracting discovery-oriented keywords from a casual music exploration.
 
 The user has no specific song or style in mind. They want to DISCOVER
@@ -207,21 +207,21 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_LH,  # E에서 specificity 미상이면 LH (44세션으로 최다)
+    "default": PROMPT_LH,  # Unknown specificity in E -> LH (most common, 44 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _compute_dynamic_weights(data: dict, specificity: str) -> dict | None:
-    """Specificity + phase/stage에 따라 동적 가중치 계산.
+    """Compute dynamic weights from specificity + phase/stage.
 
-    반환값: {"metadata": float, "attributes": float, "audio": float}
-    retriever가 이 값을 읽어서 score blend를 조정.
-    None이면 retriever가 기본 가중치를 사용.
+    Returns: {"metadata": float, "attributes": float, "audio": float}
+    The retriever reads these to adjust the score blend.
+    If None, the retriever uses its default weights.
     """
     if specificity == "LH":
-        # discovery_phase에 따라 BGE(metadata) vs attr 비중이 역전됨
+        # BGE (metadata) vs attr weighting flips depending on discovery_phase
         phase = data.get("discovery_phase", "exploring")
         weights = {
             "exploring": {"metadata": 0.7, "attributes": 0.1, "audio": 0.2},
@@ -232,7 +232,7 @@ def _compute_dynamic_weights(data: dict, specificity: str) -> dict | None:
         return weights.get(phase)
 
     if specificity == "HL":
-        # journey_stage에 따라 audio(CLAP) 비중이 점점 올라감
+        # audio (CLAP) weight increases as journey_stage advances
         stage = data.get("journey_stage", "early")
         weights = {
             "early":    {"metadata": 0.6, "attributes": 0.2, "audio": 0.2},
@@ -246,7 +246,7 @@ def _compute_dynamic_weights(data: dict, specificity: str) -> dict | None:
 
 
 def _build_bge_query(data: dict) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
@@ -258,11 +258,11 @@ def _build_bge_query(data: dict) -> str:
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
 
-    # E-LH: eureka/applying 단계에서 discovered_elements를 attr 쿼리에 사용
+    # E-LH: use discovered_elements as the attr query in the eureka/applying phases
     if specificity == "LH" and data.get("discovered_elements"):
         attr_query = data["discovered_elements"]
     else:
@@ -275,10 +275,10 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "bge_query":        bge_query,
         "clap_keywords":    clap_keywords,
         "attr_query":       attr_query,
-        "dynamic_weights":  dynamic_weights,  # retriever가 읽어서 가중치 동적 적용
+        "dynamic_weights":  dynamic_weights,  # read by the retriever to apply weights dynamically
         "rejected":         data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("seed_track", "discovered_elements", "discovery_phase",
                 "journey_stage", "direction", "constraints",
                 "technical_specs", "search_mode", "emerging_preference",

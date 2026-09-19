@@ -1,14 +1,14 @@
-"""Category I extraction prompts — 국제/다문화 음악 탐색.
+"""Category I extraction prompts — international / multicultural music exploration.
 
-18세션 (2%) — 가장 작은 카테고리.
-유저가 특정 문화권, 언어, 지역의 음악을 탐색하며
-metadata-qwen3가 국가/언어/문화 태그를 잘 처리해 메타데이터 비중이 높음.
+18 sessions (2%) — the smallest category.
+The user explores music from a specific culture, language, or region;
+metadata-qwen3 handles country/language/culture tags well, so metadata is weighted heavily.
 
-Specificity 분포: HH=3, HL=2, LH=8, LL=5
-HH/HL은 세션 수가 너무 적어 하나의 프롬프트로 합침.
+Specificity distribution: HH=3, HL=2, LH=8, LL=5
+HH/HL have too few sessions, so they share one prompt.
 """
 
-# I-HH / I-HL (합침): 구체적인 아티스트/스타일 요청
+# I-HH / I-HL (merged): specific artist / style request
 PROMPT_SPECIFIC = """You are extracting international music search keywords.
 
 The user is looking for music from a specific culture, language, or region,
@@ -44,7 +44,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# I-LH: 기억 속 국제 히트곡 찾기
+# I-LH: finding a remembered international hit
 PROMPT_LH = """You are helping find a specific international song from vague memory.
 
 The user remembers a non-English or international hit but can't recall
@@ -79,7 +79,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# I-LL: 넓은 문화 탐색
+# I-LL: broad cultural exploration
 PROMPT_LL = """You are extracting cultural music exploration keywords.
 
 The user is casually discovering music from different cultures.
@@ -112,20 +112,20 @@ Output ONLY valid JSON:
 
 PROMPTS = {
     "HH": PROMPT_SPECIFIC,
-    "HL": PROMPT_SPECIFIC,   # 2세션이라 HH와 같은 프롬프트 사용
+    "HL": PROMPT_SPECIFIC,   # only 2 sessions, so reuse the HH prompt
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_LH,    # I에서 specificity 미상이면 LH (8세션으로 최다)
+    "default": PROMPT_LH,    # Unknown specificity in I -> LH (most common, 8 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성.
+    """Build the query string for the BGE metadata index.
 
-    culture_region을 별도 tag_list 행으로 추가 —
-    메타데이터에 국가/지역 정보가 tag_list 컬럼에 있을 수 있음.
+    Adds culture_region as a separate tag_list line —
+    country/region info may live in the metadata tag_list column.
     """
     parts = []
     if data.get("artist_name"):
@@ -138,7 +138,7 @@ def _build_bge_query(data: dict) -> str:
 
 
 def build_result(data: dict, _specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data) or fallback
     clap_keywords = data.get("tag_list") or fallback
     attr_query    = data.get("tag_list") or fallback
@@ -150,7 +150,7 @@ def build_result(data: dict, _specificity: str, fallback: str) -> dict:
         "attr_query":     attr_query,
         "rejected":       data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "culture_region", "wants_different_artist", "energy_preference"):
         if key in data:
             result[key] = data[key]

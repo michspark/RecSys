@@ -16,5 +16,5 @@ corpus_types:
 cache_dir: "./cache"
 device: "cuda"
 attn_implementation: "sdpa"
-# anchor_cf 전용: 긍정 판정에 goal_progress_assessment 라벨 사용(devset 재현). blindset은 false.
+# anchor_cf only: use goal_progress_assessment labels to pick positive tracks (devset). Must be false on blindset.
 anchor_feedback: true

@@ -1,6 +1,6 @@
-"""Category G extraction prompts — 감정/무드 기반 트랙 찾기."""
+"""Category G extraction prompts — finding tracks by emotion / mood."""
 
-# G-HH: 특정 버전/리믹스/에디트 찾기
+# G-HH: finding a specific version / remix / edit
 PROMPT_HH = """You are extracting exact track version identification from a music conversation.
 
 The user is looking for a SPECIFIC VERSION, REMIX, or EDIT of a song,
@@ -45,7 +45,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# G-HL (31세션): 특정 감정의 여러 곡 탐색
+# G-HL (31 sessions): exploring several songs with a specific emotion
 PROMPT_HL = """You are extracting complex emotional and mood keywords from a music conversation.
 
 The user wants multiple tracks that match a SPECIFIC, NUANCED emotional state.
@@ -97,7 +97,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# G-LH (22세션): 기억 속 감정적 곡 찾기
+# G-LH (22 sessions): finding a remembered emotional song
 PROMPT_LH = """You are helping find a specific song the user remembers by its EMOTIONAL IMPACT.
 
 The user has a song in mind but remembers HOW IT MADE THEM FEEL,
@@ -154,7 +154,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# G-LL (19세션): 넓은 감정 요청
+# G-LL (19 sessions): broad emotional request
 PROMPT_LL = """You are extracting simple mood keywords for casual emotional music browsing.
 
 The user wants music that matches a SIMPLE, CLEAR emotional need.
@@ -214,14 +214,14 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_HL,  # G에서 specificity 미상이면 HL (31세션으로 최다)
+    "default": PROMPT_HL,  # Unknown specificity in G -> HL (most common, 31 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
@@ -231,9 +231,9 @@ def _build_bge_query(data: dict) -> str:
 
 
 def _build_lyrics_query(data: dict, specificity: str) -> str:
-    """lyrics-qwen3 임베딩 검색용 쿼리.
+    """Build the query for lyrics-qwen3 embedding search.
 
-    G-LH와 G-LL에서만 lyric_keywords가 있을 수 있음.
+    lyric_keywords can only appear in G-LH and G-LL.
     """
     if specificity in ("LH", "LL") and data.get("lyric_keywords"):
         return data["lyric_keywords"]
@@ -241,7 +241,7 @@ def _build_lyrics_query(data: dict, specificity: str) -> str:
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
     attr_query    = data.get("tag_list") or fallback
@@ -255,7 +255,7 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "lyrics_query":   lyrics_query,
         "rejected":       data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "emotional_memory", "genre_narrowing",
                 "emotional_core", "refinement", "mood_quality",
                 "wants_similar_mood", "mood_label", "frustration_level",

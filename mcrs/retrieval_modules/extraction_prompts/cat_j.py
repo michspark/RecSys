@@ -1,12 +1,12 @@
-"""Category J extraction prompts — 인기곡/히트곡 탐색.
+"""Category J extraction prompts — popular songs / hits exploration.
 
-77세션 (8%) — popularity score가 결정적 신호인 카테고리.
-유저가 "popular", "famous", "well-known", "iconic" 등을 명시적으로 요청.
+77 sessions (8%) — the popularity score is the decisive signal.
+The user explicitly asks for "popular", "famous", "well-known", "iconic", etc.
 
-Specificity 분포: HH=10, HL=30, LH=16, LL=21
+Specificity distribution: HH=10, HL=30, LH=16, LL=21
 """
 
-# J-HH: 정확한 인기곡 요청
+# J-HH: exact popular-song request
 PROMPT_HH = """You are extracting exact popular track requests from a music conversation.
 
 The user is requesting a SPECIFIC well-known/popular song by title and/or artist,
@@ -48,7 +48,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# J-HL: 니치 커뮤니티 내 인기곡 탐색
+# J-HL: exploring popular songs within a niche community
 PROMPT_HL = """You are extracting niche-community popularity keywords from a music conversation.
 
 The user wants tracks that are popular within SPECIFIC music communities
@@ -99,7 +99,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# J-LH: 기억 속 히트곡 찾기
+# J-LH: finding a remembered hit
 PROMPT_LH = """You are helping find a specific hit song from vague memory.
 
 The user remembers a popular song but can't recall exact details.
@@ -145,7 +145,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# J-LL: 넓은 인기곡 브라우징
+# J-LL: broad browsing of popular songs
 PROMPT_LL = """You are extracting broad popular music browsing keywords.
 
 The user wants well-known, widely popular songs from a genre or era.
@@ -195,18 +195,18 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_HL,  # J에서 specificity 미상이면 HL (30세션으로 최다)
+    "default": PROMPT_HL,  # Unknown specificity in J -> HL (most common, 30 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict, specificity: str) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
-    # J-HL: niche_community를 별도 tag_list 행으로 추가
+    # J-HL: add niche_community as a separate tag_list line
     if specificity == "HL" and data.get("niche_community"):
         parts.append(f"tag_list: {data['niche_community']}")
     if data.get("tag_list"):
@@ -215,9 +215,9 @@ def _build_bge_query(data: dict, specificity: str) -> str:
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환.
+    """Convert the parsed JSON into the format the retriever consumes.
 
-    use_popularity=True: retriever가 popularity_scores를 블렌드에 포함시킴.
+    use_popularity=True: the retriever includes popularity_scores in the blend.
     """
     bge_query     = _build_bge_query(data, specificity) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
@@ -229,9 +229,9 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "clap_keywords":    clap_keywords,
         "attr_query":       attr_query,
         "rejected":         data.get("rejected") or [],
-        "use_popularity":   True,   # J는 모든 specificity에서 popularity 활성화
+        "use_popularity":   True,   # J enables popularity for every specificity
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "popularity_era", "popularity_context",
                 "niche_community", "popularity_type",
                 "energy_preference", "genre_focus", "scope", "mood_clue"):

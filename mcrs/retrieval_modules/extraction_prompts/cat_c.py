@@ -1,6 +1,6 @@
-"""Category C extraction prompts — 앨범 커버/비주얼 기반 트랙 찾기."""
+"""Category C extraction prompts — finding tracks by album cover / visuals."""
 
-# C-HH: 비주얼 스타일 + 음악 장르 동시에 명시
+# C-HH: visual style and music genre both stated
 PROMPT_HH = """You are extracting visual and audio search keywords from a music conversation.
 
 The user is describing BOTH the visual style they remember AND specific musical characteristics.
@@ -33,7 +33,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# C-HL: 비주얼로 시작하지만 음악 장르도 점차 좁혀가는 패턴
+# C-HL: starts from visuals, then gradually narrows the music genre
 PROMPT_HL = """You are helping find an album the user remembers by its VISUAL STYLE and musical genre.
 
 The user remembers the album cover clearly and is combining visual memory with genre clues.
@@ -71,7 +71,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# C-LH: 앨범 커버 아트만 기억하는 경우 (가장 흔한 패턴, 32/58 세션)
+# C-LH: only the album cover art is remembered (most common pattern, 32/58 sessions)
 PROMPT_LH = """You are helping find an album the user remembers ONLY by its cover art.
 
 The user has a clear visual memory of the album cover but doesn't know the artist or title.
@@ -114,7 +114,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# C-LL: 막연한 비주얼 기억 + 음악 분위기로 탐색
+# C-LL: vague visual memory + musical mood exploration
 PROMPT_LL = """You are helping find music based on VAGUE visual memories and general mood.
 
 The user has a fuzzy memory of the album cover and is exploring by mood and general vibe.
@@ -158,14 +158,14 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_LH,  # C에서 specificity 미상이면 LH가 가장 흔한 패턴
+    "default": PROMPT_LH,  # Unknown specificity in C -> LH, the most common pattern
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict, specificity: str) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
@@ -175,7 +175,7 @@ def _build_bge_query(data: dict, specificity: str) -> str:
 
 
 def _build_attr_query(data: dict, specificity: str) -> str:
-    """attributes-qwen3 임베딩 검색용 쿼리 구성."""
+    """Build the query for attributes-qwen3 embedding search."""
     parts = []
     if data.get("tag_list"):
         parts.append(data["tag_list"])
@@ -185,18 +185,18 @@ def _build_attr_query(data: dict, specificity: str) -> str:
 
 
 def _build_image_query(data: dict, specificity: str) -> str:
-    """SigLIP2 비주얼 임베딩 검색용 텍스트 쿼리 구성.
+    """Build the text query for SigLIP2 visual embedding search.
 
-    visual_keywords를 SigLIP2의 텍스트 인코더에 넣을 자연어 설명으로 변환.
+    Turns visual_keywords into a natural-language description for SigLIP2's text encoder.
     """
     if data.get("visual_keywords"):
         return data["visual_keywords"]
-    # visual_keywords 없으면 tag_list로 fallback
+    # Fall back to tag_list when visual_keywords is missing
     return data.get("tag_list") or ""
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query   = _build_bge_query(data, specificity) or fallback
     attr_query  = _build_attr_query(data, specificity) or fallback
     image_query = _build_image_query(data, specificity) or fallback
@@ -207,12 +207,12 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "direct_request":  data.get("direct_request"),
         "bge_query":       bge_query,
         "clap_keywords":   clap_keywords,
-        "attr_query":      attr_query,   # attributes-qwen3 검색용
-        "image_query":     image_query,  # SigLIP2 텍스트 쿼리
+        "attr_query":      attr_query,   # for attributes-qwen3 search
+        "image_query":     image_query,  # SigLIP2 text query
         "visual_keywords": data.get("visual_keywords"),
         "rejected":        data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "mood_shift"):
         if key in data:
             result[key] = data[key]

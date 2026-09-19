@@ -1,12 +1,12 @@
-"""Category K extraction prompts — 자유 탐색/발견.
+"""Category K extraction prompts — open exploration / discovery.
 
-156세션 (16%) — 가장 큰 카테고리.
-유저가 엄격한 제약 없이 넓게 탐색하며, metadata + popularity + attributes가 고르게 사용됨.
+156 sessions (16%) — the largest category.
+The user explores broadly without strict constraints; metadata + popularity + attributes are used evenly.
 
-Specificity 분포: HH=15, HL=44, LH=47, LL=50
+Specificity distribution: HH=15, HL=44, LH=47, LL=50
 """
 
-# K-HH: 특정 연도/시대의 대표 트랙 찾기
+# K-HH: finding representative tracks of a specific year / era
 PROMPT_HH = """You are extracting specific track/era identification from a broad music conversation.
 
 The user is looking for a SPECIFIC defining track from a particular year,
@@ -49,7 +49,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# K-HL: 스타일 앵커 내 다양한 탐색
+# K-HL: varied exploration within a style anchor
 PROMPT_HL = """You are extracting focused style exploration keywords from a music conversation.
 
 The user is exploring multiple tracks within a specific style, artist catalog,
@@ -100,7 +100,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# K-LH: 기억 속 곡/소리 찾기
+# K-LH: finding a remembered song / sound
 PROMPT_LH = """You are helping find a specific song or sound from vague memory.
 
 The user remembers a song or a specific sonic quality but can't place it exactly.
@@ -158,7 +158,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# K-LL: 자유 발견 브라우징
+# K-LL: open discovery browsing
 PROMPT_LL = """You are extracting open-ended music discovery keywords.
 
 The user is freely browsing music with no specific target.
@@ -217,23 +217,23 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "default": PROMPT_LL,  # K에서 specificity 미상이면 LL (50세션으로 최다)
+    "default": PROMPT_LL,  # Unknown specificity in K -> LL (most common, 50 sessions)
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict, specificity: str) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
     if data.get("tag_list"):
         parts.append(f"tag_list: {data['tag_list']}")
-    # K-HH: target_year를 별도 tag_list 행으로 — 연도가 메타데이터에 있을 수 있음
+    # K-HH: target_year as a separate tag_list line — the year may be in the metadata
     if specificity == "HH" and data.get("target_year"):
         parts.append(f"tag_list: {data['target_year']}")
-    # K-LH: era/genre 앵커를 별도 행으로 강화
+    # K-LH: reinforce era/genre anchors on separate lines
     if specificity == "LH":
         if data.get("era_anchor"):
             parts.append(f"tag_list: {data['era_anchor']}")
@@ -243,10 +243,10 @@ def _build_bge_query(data: dict, specificity: str) -> str:
 
 
 def _build_attr_query(data: dict) -> str:
-    """attributes-qwen3 임베딩 검색용 쿼리 구성.
+    """Build the query for attributes-qwen3 embedding search.
 
-    style_anchor(K-HL)와 emerging_taste(K-LL)를 앞에 배치해
-    현재 방향을 강조.
+    Places style_anchor (K-HL) and emerging_taste (K-LL) first
+    to emphasize the current direction.
     """
     prefix_parts = []
     if data.get("style_anchor"):
@@ -260,19 +260,19 @@ def _build_attr_query(data: dict) -> str:
 
 
 def build_result(data: dict, specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data, specificity) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
     attr_query    = _build_attr_query(data) or fallback
 
-    # lyrics-qwen3: K-LH에서만 lyric_keywords가 나올 수 있음
+    # lyrics-qwen3: lyric_keywords can only appear in K-LH
     lyrics_query  = data.get("lyric_keywords") if specificity == "LH" else None
 
-    # popularity 활성화 판단:
-    # HH: 항상 (시대 정의 트랙 → 실제 히트여야 함)
-    # mainstream hint: 항상
-    # LL + underground 아닐 때: "any"나 미설정이면 popular 트랙 선호
-    # LL + underground: 유저가 숨겨진 곡을 원하므로 끔
+    # When to enable popularity:
+    # HH: always (era-defining tracks should be real hits)
+    # mainstream hint: always
+    # LL and not underground: prefer popular tracks when "any" or unset
+    # LL + underground: off, since the user wants hidden gems
     popularity_hint = data.get("popularity_hint")
     use_popularity = (
         specificity == "HH"
@@ -289,7 +289,7 @@ def build_result(data: dict, specificity: str, fallback: str) -> dict:
         "rejected":           data.get("rejected") or [],
         "use_popularity":     use_popularity,
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "target_year", "target_era", "scope_after",
                 "style_anchor", "current_facet", "wants_different_artist",
                 "era_anchor", "genre_anchor", "narrowing_history",

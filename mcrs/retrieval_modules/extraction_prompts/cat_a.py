@@ -1,6 +1,6 @@
-"""Category A extraction prompts — 오디오 특성/분위기로 트랙 찾기."""
+"""Category A extraction prompts — finding tracks by audio characteristics / mood."""
 
-# A-HL (26세션): 구체적 오디오 특성 명시
+# A-HL (26 sessions): specific audio characteristics stated
 PROMPT_HL = """You are extracting audio-focused search keywords from a music conversation.
 
 The user is describing SPECIFIC audio characteristics they want:
@@ -37,7 +37,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# A-LH (13세션): 기억 속 특정 곡 찾기
+# A-LH (13 sessions): finding a specific remembered song
 PROMPT_LH = """You are helping find a SPECIFIC track the user is trying to remember.
 
 The user has a song in mind but can't recall the exact name.
@@ -75,7 +75,7 @@ Output ONLY valid JSON:
 }}"""
 
 
-# A-LL (22세션): 넓은 분위기 탐색
+# A-LL (22 sessions): broad mood exploration
 PROMPT_LL = """You are extracting mood and atmosphere keywords from a music conversation.
 
 The user is exploring a BROAD sonic mood or atmosphere.
@@ -120,38 +120,38 @@ PROMPTS = {
     "HL": PROMPT_HL,
     "LH": PROMPT_LH,
     "LL": PROMPT_LL,
-    "HH": PROMPT_HL,  # A에는 HH 세션이 없으므로 HL로 fallback
+    "HH": PROMPT_HL,  # Category A has no HH sessions, so fall back to HL
     "default": PROMPT_HL,
 }
 
 
-# ── 쿼리 빌더 ─────────────────────────────────────────────────────────────────
+# ── Query builders ────────────────────────────────────────────────────────────
 
 def _build_bge_query(data: dict) -> str:
-    """BGE 메타데이터 인덱스 검색용 쿼리 문자열 구성."""
+    """Build the query string for the BGE metadata index."""
     parts = []
     if data.get("artist_name"):
         parts.append(f"artist_name: {data['artist_name']}")
     if data.get("tag_list"):
         parts.append(f"tag_list: {data['tag_list']}")
-    # A-LL: continue_from이 있으면 artist_name으로 추가해 BGE 매칭 강화
+    # A-LL: add continue_from as artist_name to strengthen BGE matching
     if data.get("continue_from"):
         parts.append(f"artist_name: {data['continue_from']}")
     return "\n".join(parts)
 
 
 def build_result(data: dict, _specificity: str, fallback: str) -> dict:
-    """JSON 파싱 결과를 retriever가 쓰는 형식으로 변환."""
+    """Convert the parsed JSON into the format the retriever consumes."""
     bge_query     = _build_bge_query(data) or fallback
     clap_keywords = data.get("clap_keywords") or data.get("tag_list") or fallback
 
     result = {
-        "direct_request": None,  # Category A에서는 직접 요청이 거의 없음
+        "direct_request": None,  # Direct requests are rare in category A
         "bge_query":      bge_query,
         "clap_keywords":  clap_keywords,
         "rejected":       data.get("rejected") or [],
     }
-    # 카테고리 전용 필드 그대로 전달
+    # Pass category-specific fields through unchanged
     for key in ("found", "continue_from"):
         if key in data:
             result[key] = data[key]

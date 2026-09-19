@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import List, Sequence, Tuple
+from typing import List, Sequence
 
 def _whitespace_tokens(text: str) -> List[str]:
     """Tokenize with whitespace split only (no normalization)."""

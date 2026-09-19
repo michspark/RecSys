@@ -6,12 +6,9 @@ from typing import List, Optional, Dict
 import numpy as np
 import torch
 import torch.nn.functional as F
-from datasets import load_dataset, concatenate_datasets
-from transformers import ClapModel, ClapProcessor, AutoTokenizer, AutoModelForCausalLM
+from transformers import AutoTokenizer, AutoModelForCausalLM
 from .extract_query_comp import extract_structured_query
 from .clap import CLAP_MODEL
-from .bge import BGE_MODEL
-from .bm25 import BM25_MODEL
 from .reranker import RERANKER
 
 class HYBRID_MODEL:
@@ -130,8 +127,6 @@ class HYBRID_MODEL:
         """Retrieve top-k tracks, optionally re-ranked by user CF-BPR affinity."""
         components = self._lookup_or_extract(query)
         bge_scores = self._normalize(self._bge_scores(components["bge_query"]))
-        # clap_scores = self._normalize(self._clap_scores(components["clap_keywords"]))
-        # combined = self.alpha * bge_scores + self.beta * clap_scores
         combined = bge_scores
 
         # Pull 100 candidates for re-ranking (topk*5 if no reranker)
@@ -158,12 +153,14 @@ class HYBRID_MODEL:
 
 
 class ANCHOR_CF_MODEL:
-    """BGE 누적쿼리 + anchor(메타 벡터블렌드) + cf-bpr(score fusion).
+    """BGE cumulative query + anchor (metadata vector blend) + cf-bpr (score fusion).
 
-    - 쿼리: 누적 대화(retrieval_input)를 BGE로 인코딩 (QUERY_INSTRUCTION 포함)
-    - anchor: 직전 (긍정) 추천 트랙 메타데이터를 BGE로 인코딩해 alpha 가중합 후 재정규화
-    - cf-bpr: 누적 (긍정) 트랙들의 cf-bpr 평균 ↔ 전체 트랙 cf-bpr, z-score로 beta 융합
-    anchor/positive/exclude/turn 은 pipeline(batch_chat)에서 주입한다. 없으면 query-only로 동작.
+    - query: the cumulative conversation (retrieval_input) encoded with BGE (with QUERY_INSTRUCTION)
+    - anchor: metadata of the previous (positive) recommended track, encoded with BGE, blended in
+      with weight alpha and re-normalized
+    - cf-bpr: mean cf-bpr vector of the accumulated (positive) tracks vs. every track's cf-bpr,
+      fused at score level via z-score with weight beta
+    anchor/positive/exclude/turn are injected by the pipeline (batch_chat); without them it runs query-only.
     """
 
     def __init__(self, bge_model, cf_cache_dir: str = "./precomputed/reranker",
@@ -173,18 +170,18 @@ class ANCHOR_CF_MODEL:
         self.device = bge_model.device
         self.track_ids = bge_model.track_ids
         self.track_id_to_idx = {tid: i for i, tid in enumerate(self.track_ids)}
-        self.track_embs = bge_model.embeddings.to(self.device)   # [N, 1024] 정규화됨
+        self.track_embs = bge_model.embeddings.to(self.device)   # [N, 1024], L2-normalized
         self.beta = beta
         self.alpha_start, self.alpha_step, self.alpha_cap = alpha_start, alpha_step, alpha_cap
-        self.accepts_anchor = True   # batch_chat이 anchor 정보를 넘길지 판단하는 마커
+        self.accepts_anchor = True   # marker telling batch_chat to pass anchor info
 
-        # cf-bpr 트랙 인덱스 (RERANKER가 빌드한 정규화 캐시 재사용)
+        # cf-bpr track index (reuses the normalized cache built by RERANKER)
         cf_embs = torch.load(os.path.join(cf_cache_dir, "cf_bpr_track.pt"), map_location="cpu")
         with open(os.path.join(cf_cache_dir, "cf_bpr_track_ids.json")) as f:
             cf_track_ids = json.load(f)
-        self.cf_embs = cf_embs.to(self.device)                   # [M, 128] 정규화됨
+        self.cf_embs = cf_embs.to(self.device)                   # [M, 128], L2-normalized
         self._cf_id_to_idx = {tid: i for i, tid in enumerate(cf_track_ids)}
-        # bge 트랙 순서 → cf 인덱스 (cf 없으면 -1)
+        # BGE track order -> cf index (-1 if the track has no cf embedding)
         cf_pos = [self._cf_id_to_idx.get(tid, -1) for tid in self.track_ids]
         self.cf_pos = torch.tensor(cf_pos, dtype=torch.long, device=self.device)
         self.valid_cf = self.cf_pos >= 0
@@ -193,7 +190,7 @@ class ANCHOR_CF_MODEL:
 
     @torch.no_grad()
     def _encode(self, text: str, is_query: bool) -> torch.Tensor:
-        """BGE CLS 인코딩 + L2 정규화. 쿼리면 instruction 접두."""
+        """BGE CLS encoding + L2 normalization. Queries get the instruction prefix."""
         if is_query:
             text = self.bge.QUERY_INSTRUCTION + text
         batch = self.bge.tokenizer([text], padding=True, truncation=True,
@@ -202,7 +199,7 @@ class ANCHOR_CF_MODEL:
         return F.normalize(emb, p=2, dim=1).squeeze(0).to(self.device)
 
     def _encode_anchor(self, track_id: str) -> Optional[torch.Tensor]:
-        """anchor 트랙 메타데이터를 후보 인덱스와 동일 포맷(instruction 없음)으로 인코딩."""
+        """Encode anchor track metadata in the same format as the candidate index (no instruction)."""
         meta = self.bge.metadata_dict.get(track_id)
         if meta is None:
             return None
@@ -221,7 +218,7 @@ class ANCHOR_CF_MODEL:
         return (scores - scores.mean()) / std
 
     def _cf_query(self, positive_track_ids: Optional[List[str]]) -> Optional[torch.Tensor]:
-        """누적 긍정 트랙들의 cf-bpr 평균 → 정규화 [128]. cf 있는 게 없으면 None."""
+        """Mean cf-bpr vector of accumulated positive tracks, normalized [128]. None if none have cf."""
         if not positive_track_ids:
             return None
         vecs = [self.cf_embs[self._cf_id_to_idx[t]] for t in positive_track_ids if t in self._cf_id_to_idx]
@@ -237,7 +234,7 @@ class ANCHOR_CF_MODEL:
         query_vec = self._encode(query, is_query=True)
         exclude = set(exclude_ids or [])
 
-        # anchor 벡터 블렌딩 (같은 BGE 공간)
+        # Anchor vector blending (same BGE space)
         alpha = self._alpha(turn_number)
         if alpha > 0 and anchor_track_id is not None:
             anchor_vec = self._encode_anchor(anchor_track_id)
@@ -247,19 +244,19 @@ class ANCHOR_CF_MODEL:
 
         bge_score = self.track_embs @ query_vec   # [N]
 
-        # cf-bpr 채널 (score-level z-score 융합)
+        # cf-bpr channel (score-level z-score fusion)
         cf_q = self._cf_query(positive_track_ids) if self.beta > 0 else None
         if cf_q is not None:
             cf_raw = self.cf_embs @ cf_q          # [M]
             aligned = torch.full((len(self.track_ids),), float("nan"), device=self.device)
             aligned[self.valid_cf] = cf_raw[self.cf_pos[self.valid_cf]]
             nan_mask = torch.isnan(aligned)
-            aligned[nan_mask] = aligned[~nan_mask].mean()   # cf 없는 후보는 평균 대체
+            aligned[nan_mask] = aligned[~nan_mask].mean()   # tracks without cf get the mean
             final = (1 - self.beta) * self._zscore(bge_score) + self.beta * self._zscore(aligned)
         else:
             final = bge_score
 
-        # 과거 추천 + anchor 제외
+        # Exclude past recommendations + anchor
         for eid in exclude:
             idx = self.track_id_to_idx.get(eid)
             if idx is not None:
@@ -289,13 +286,16 @@ class ANCHOR_CF_MODEL:
 
 
 class ANCHOR_BGE_BM25_CF_MODEL:
-    """BGE + BM25 누적쿼리 + anchor(메타 벡터블렌드) + cf-bpr(score fusion).
+    """BGE + BM25 cumulative query + anchor (metadata vector blend) + cf-bpr (score fusion).
 
-    - 쿼리: 누적 대화(retrieval_input)를 BGE로 인코딩 (QUERY_INSTRUCTION 포함)
-    - anchor: 직전 (긍정) 추천 트랙 메타데이터를 BGE로 인코딩해 alpha 가중합 후 재정규화
-    - cf-bpr: 누적 (긍정) 트랙들의 cf-bpr 평균 ↔ 전체 트랙 cf-bpr, z-score로 beta 융합
-    - BM25: 동일 누적쿼리로 lexical 검색 → dense(best) 순위와 RRF 순위융합 (sparse 상보성)
-    anchor/positive/exclude/turn 은 pipeline(batch_chat)에서 주입한다. 없으면 query-only로 동작.
+    - query: the cumulative conversation (retrieval_input) encoded with BGE (with QUERY_INSTRUCTION)
+    - anchor: metadata of the previous (positive) recommended track, encoded with BGE, blended in
+      with weight alpha and re-normalized
+    - cf-bpr: mean cf-bpr vector of the accumulated (positive) tracks vs. every track's cf-bpr,
+      fused at score level via z-score with weight beta
+    - BM25: lexical search with the same cumulative query, fused with the dense ranking via RRF
+      (sparse/dense complementarity)
+    anchor/positive/exclude/turn are injected by the pipeline (batch_chat); without them it runs query-only.
     """
 
     def __init__(self, bge_model, bm25_model, cf_cache_dir: str = "./precomputed/reranker",
@@ -308,32 +308,32 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         self.device = bge_model.device
         self.track_ids = bge_model.track_ids
         self.track_id_to_idx = {tid: i for i, tid in enumerate(self.track_ids)}
-        self.track_embs = bge_model.embeddings.to(self.device)   # [N, 1024] 정규화됨
+        self.track_embs = bge_model.embeddings.to(self.device)   # [N, 1024], L2-normalized
         self.beta = beta
         self.alpha_start, self.alpha_step, self.alpha_cap = alpha_start, alpha_step, alpha_cap
-        self.accepts_anchor = True   # batch_chat이 anchor 정보를 넘길지 판단하는 마커
+        self.accepts_anchor = True   # marker telling batch_chat to pass anchor info
 
-        # BM25 sparse 채널(누적쿼리 lexical 매칭) + RRF 순위융합 하이퍼파라미터
-        self.bm25 = bm25_model       # 기존 raw BM25 인덱스(stopwords on, stemmer 없음)
-        self.bm25_topk = bm25_topk   # BM25에서 뽑을 후보 수
-        self.dense_pool = dense_pool # dense(best=BGE+anchor+cf)에서 뽑을 후보 수 (RRF 입력 풀)
-        self.rrf_k = rrf_k           # RRF 상수 K (sweep 확인: 10이 최적, nDCG@20 0.1489)
+        # BM25 sparse channel (lexical match on cumulative query) + RRF fusion hyperparameters
+        self.bm25 = bm25_model       # raw BM25 index (stopwords on, no stemmer)
+        self.bm25_topk = bm25_topk   # number of BM25 candidates
+        self.dense_pool = dense_pool # number of dense (BGE+anchor+cf) candidates fed to RRF
+        self.rrf_k = rrf_k           # RRF constant K (sweep: 10 is best, nDCG@20 0.1489)
 
-        # 규칙 기반 reranker (학습 없음): RRF top-N 후보를 메타 신호 가점으로 재정렬.
-        #  - rerank_pool: RRF로 먼저 뽑아 재정렬 입력으로 쓸 후보 수 (top-100).
-        #  - rerank_weights: 신호 가중치. None/{}이면 reranker 비활성(=RRF 순위 그대로)이 기본.
-        #    devset 스윕 검증 최적은 {"artist":2.0,"era":1.0,"pop":0.2}(+0.005). 다만 blindset
-        #    일반화는 미확인이라 기본 off. 켜려면 이 값을 명시 전달.
+        # Rule-based reranker (no training): re-sorts the RRF top-N by metadata signal boosts.
+        #  - rerank_pool: number of RRF candidates fed to the reranker (top-100).
+        #  - rerank_weights: per-signal weights. None/{} disables the reranker (RRF order as-is).
+        #    Best on the devset sweep was {"artist":2.0,"era":1.0,"pop":0.2} (+0.005), but blindset
+        #    generalization is unverified, so it is off by default. Pass weights explicitly to enable.
         self.rerank_pool = rerank_pool
         self.rerank_weights = rerank_weights if rerank_weights is not None else {}
 
-        # cf-bpr 트랙 인덱스 (RERANKER가 빌드한 정규화 캐시 재사용)
+        # cf-bpr track index (reuses the normalized cache built by RERANKER)
         cf_embs = torch.load(os.path.join(cf_cache_dir, "cf_bpr_track.pt"), map_location="cpu")
         with open(os.path.join(cf_cache_dir, "cf_bpr_track_ids.json")) as f:
             cf_track_ids = json.load(f)
-        self.cf_embs = cf_embs.to(self.device)                   # [M, 128] 정규화됨
+        self.cf_embs = cf_embs.to(self.device)                   # [M, 128], L2-normalized
         self._cf_id_to_idx = {tid: i for i, tid in enumerate(cf_track_ids)}
-        # bge 트랙 순서 → cf 인덱스 (cf 없으면 -1)
+        # BGE track order -> cf index (-1 if the track has no cf embedding)
         cf_pos = [self._cf_id_to_idx.get(tid, -1) for tid in self.track_ids]
         self.cf_pos = torch.tensor(cf_pos, dtype=torch.long, device=self.device)
         self.valid_cf = self.cf_pos >= 0
@@ -343,29 +343,29 @@ class ANCHOR_BGE_BM25_CF_MODEL:
 
     @staticmethod
     def _rrf_fuse(ranked_lists: List[List[str]], topk: int, k: int) -> List[str]:
-        """Reciprocal Rank Fusion: 여러 순위 리스트를 1/(k+rank)로 합산해 재정렬.
+        """Reciprocal Rank Fusion: sum 1/(k+rank) across several ranked lists and re-sort.
 
-        - 각 리스트에서 순위 rank(1-based)에 1/(k+rank) 점수 부여 → 같은 트랙은 양쪽 점수 합산.
-        - 점수 스케일(코사인 vs BM25)을 안 쓰고 '순위'만 쓰므로 sparse+dense 결합에 안전.
-        - 두 리스트에 모두 상위로 등장하는 트랙이 가장 높은 점수를 받음(상호 보강).
+        - Each list gives rank r (1-based) a score of 1/(k+r); a track's scores are summed across lists.
+        - Uses ranks only, not raw scores (cosine vs. BM25), so it is safe for sparse+dense fusion.
+        - Tracks ranked high in both lists get the highest fused score.
         Args:
-            ranked_lists: 각 채널의 순위된 track_id 리스트 (상위가 앞).
-            topk: 반환할 개수.
-            k: RRF 상수. 작을수록 상위권 가중이 커짐. 관례적으로 60.
+            ranked_lists: ranked track_id lists per channel (best first).
+            topk: number of results to return.
+            k: RRF constant. Smaller k weights top ranks more heavily. Conventionally 60.
         Returns:
-            융합 점수 내림차순 상위 topk track_id.
+            Top-k track_ids by fused score, descending.
         """
         fused_scores: dict = {}
         for ranked in ranked_lists:
             for rank, track_id in enumerate(ranked):
-                # enumerate는 0-based이므로 rank+1로 1-based 순위 변환
+                # enumerate is 0-based, so rank+1 gives the 1-based rank
                 fused_scores[track_id] = fused_scores.get(track_id, 0.0) + 1.0 / (k + rank + 1)
         ordered = sorted(fused_scores.items(), key=lambda item: item[1], reverse=True)
         return [track_id for track_id, _score in ordered[:topk]]
 
     @torch.no_grad()
     def _encode(self, text: str, is_query: bool) -> torch.Tensor:
-        """BGE CLS 인코딩 + L2 정규화. 쿼리면 instruction 접두."""
+        """BGE CLS encoding + L2 normalization. Queries get the instruction prefix."""
         if is_query:
             text = self.bge.QUERY_INSTRUCTION + text
         batch = self.bge.tokenizer([text], padding=True, truncation=True,
@@ -374,7 +374,7 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         return F.normalize(emb, p=2, dim=1).squeeze(0).to(self.device)
 
     def _encode_anchor(self, track_id: str) -> Optional[torch.Tensor]:
-        """anchor 트랙 메타데이터를 후보 인덱스와 동일 포맷(instruction 없음)으로 인코딩."""
+        """Encode anchor track metadata in the same format as the candidate index (no instruction)."""
         meta = self.bge.metadata_dict.get(track_id)
         if meta is None:
             return None
@@ -393,7 +393,7 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         return (scores - scores.mean()) / std
 
     def _cf_query(self, positive_track_ids: Optional[List[str]]) -> Optional[torch.Tensor]:
-        """누적 긍정 트랙들의 cf-bpr 평균 → 정규화 [128]. cf 있는 게 없으면 None."""
+        """Mean cf-bpr vector of accumulated positive tracks, normalized [128]. None if none have cf."""
         if not positive_track_ids:
             return None
         vecs = [self.cf_embs[self._cf_id_to_idx[t]] for t in positive_track_ids if t in self._cf_id_to_idx]
@@ -409,7 +409,7 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         query_vec = self._encode(query, is_query=True)
         exclude = set(exclude_ids or [])
 
-        # anchor 벡터 블렌딩 (같은 BGE 공간)
+        # Anchor vector blending (same BGE space)
         alpha = self._alpha(turn_number)
         if alpha > 0 and anchor_track_id is not None:
             anchor_vec = self._encode_anchor(anchor_track_id)
@@ -419,47 +419,47 @@ class ANCHOR_BGE_BM25_CF_MODEL:
 
         bge_score = self.track_embs @ query_vec   # [N]
 
-        # cf-bpr 채널 (score-level z-score 융합)
+        # cf-bpr channel (score-level z-score fusion)
         cf_q = self._cf_query(positive_track_ids) if self.beta > 0 else None
         if cf_q is not None:
             cf_raw = self.cf_embs @ cf_q          # [M]
             aligned = torch.full((len(self.track_ids),), float("nan"), device=self.device)
             aligned[self.valid_cf] = cf_raw[self.cf_pos[self.valid_cf]]
             nan_mask = torch.isnan(aligned)
-            aligned[nan_mask] = aligned[~nan_mask].mean()   # cf 없는 후보는 평균 대체
+            aligned[nan_mask] = aligned[~nan_mask].mean()   # tracks without cf get the mean
             final = (1 - self.beta) * self._zscore(bge_score) + self.beta * self._zscore(aligned)
         else:
             final = bge_score
 
-        # 과거 추천 + anchor 제외 (dense score에서 -1e9로 침몰)
+        # Exclude past recommendations + anchor (sink to -1e9 in dense score)
         for eid in exclude:
             idx = self.track_id_to_idx.get(eid)
             if idx is not None:
                 final[idx] = -1e9
 
-        # dense(best=BGE+anchor+cf) 후보 풀: 점수 상위 dense_pool개를 순위대로
+        # Dense (BGE+anchor+cf) candidate pool: top dense_pool tracks by score
         dense_n = min(self.dense_pool, final.shape[0])
         dense_indices = torch.topk(final, dense_n).indices.cpu().tolist()
         dense_ranked = [self.track_ids[i] for i in dense_indices if self.track_ids[i] not in exclude]
 
-        # BM25(sparse) 후보 풀: 동일 누적쿼리로 lexical 검색 후 exclude 제거
+        # BM25 (sparse) candidate pool: lexical search on the same query, minus excluded tracks
         bm25_ranked = [t for t in self.bm25.text_to_item_retrieval(query, self.bm25_topk) if t not in exclude]
 
-        # 두 채널 순위를 RRF로 융합 → reranker 입력 풀(top-100). (rerank_pool >= topk)
+        # Fuse both channels with RRF -> reranker input pool (rerank_pool >= topk)
         pool = max(topk, self.rerank_pool)
         fused = self._rrf_fuse([dense_ranked, bm25_ranked], pool, self.rrf_k)
 
-        # 규칙 기반 reranker: 켜져 있으면 메타 신호 가점으로 재정렬 후 topk. 비활성이면 RRF 그대로.
+        # Rule-based reranker: if enabled, re-sort by metadata boosts; otherwise keep RRF order
         if self.rerank_weights:
             fused = self._rule_rerank(query, fused)
         return fused[:topk]
 
-    # ----- 규칙 기반 reranker (학습 없음) -----------------------------------
-    # RRF top-N 후보를 메타 신호로 가점해 재정렬. 신호/가중치는 devset 스윕으로 검증됨
-    # (exact_name 제거, artist/era/pop). test/rerank_rule_signals.py와 동일한 로직.
+    # ----- Rule-based reranker (no training) ---------------------------------
+    # Boosts the RRF top-N by metadata signals. Signals/weights were validated on a devset sweep
+    # (artist/era/pop; exact_name dropped).
     @staticmethod
     def _meta_first(value) -> str:
-        """list[str] 메타 필드(track_name/artist_name)의 첫 원소를 소문자로. 비었으면 ''."""
+        """Lowercased first element of a list[str] metadata field (track_name/artist_name); '' if empty."""
         if isinstance(value, list):
             return value[0].lower() if value else ""
         if isinstance(value, str):
@@ -468,23 +468,23 @@ class ANCHOR_BGE_BM25_CF_MODEL:
 
     def _signal_boosts(self, signal_name: str, query_lower: str,
                        candidate_ids: List[str]) -> Dict[str, float]:
-        """신호별 {track_id: boost} 계산. 메타는 bge.metadata_dict(전체 메타 row) 사용."""
+        """Compute {track_id: boost} for one signal, using bge.metadata_dict (full metadata rows)."""
         meta = self.bge.metadata_dict
         boost: Dict[str, float] = {}
         if signal_name == "artist":
-            # 아티스트명이 쿼리에 통째로 등장하면 가점 (3자 이상, 오매칭 방지)
+            # Boost if the full artist name appears in the query (>= 3 chars to avoid false matches)
             for tid in candidate_ids:
                 artist = self._meta_first(meta.get(tid, {}).get("artist_name"))
                 if artist and len(artist) >= 3 and artist in query_lower:
                     boost[tid] = 1.0
         elif signal_name == "exact_name":
-            # 곡명이 쿼리에 통째로 등장하면 가점 (4자 이상, 오매칭 방지)
+            # Boost if the full track name appears in the query (>= 4 chars to avoid false matches)
             for tid in candidate_ids:
                 name = self._meta_first(meta.get(tid, {}).get("track_name"))
                 if name and len(name) >= 4 and name in query_lower:
                     boost[tid] = 1.0
         elif signal_name == "era":
-            # 쿼리의 연도(YYYY)/연대(90s 등)와 release_date 연도가 일치하면 가점
+            # Boost if a year (YYYY) or decade (e.g. 90s) in the query matches the release_date year
             years = set(re.findall(r"\b(?:19\d{2}|20\d{2})\b", query_lower))
             decades = {m[1] for m in re.findall(r"\b(19|20)?(\d0)s\b", query_lower)}
             if not years and not decades:
@@ -503,7 +503,7 @@ class ANCHOR_BGE_BM25_CF_MODEL:
                 if decade_two_digit in decades:
                     boost[tid] = 1.0
         elif signal_name == "pop":
-            # popularity를 후보 풀 안에서 min-max 정규화한 약한 보조 가점
+            # Weak auxiliary boost: popularity min-max normalized within the candidate pool
             pops = np.array(
                 [float(meta.get(tid, {}).get("popularity", 0) or 0) for tid in candidate_ids],
                 dtype=float,
@@ -516,43 +516,41 @@ class ANCHOR_BGE_BM25_CF_MODEL:
         return boost
 
     def _rule_rerank(self, query: str, fused: List[str]) -> List[str]:
-        """RRF top-N(fused)을 규칙 신호 가점으로 재정렬해 반환.
+        """Re-sort the RRF top-N (fused) by rule-based signal boosts.
 
-        base 점수 = 순위 위치의 RRF식 역수 1/(rrf_k+i+1)를 z-score 정규화(신호 스케일 맞춤).
-        base만으로는 원래 RRF 순서를 보존하므로, 신호 가점이 순서를 바꾸는 부분만 작동한다.
+        Base score = RRF-style reciprocal of the position, 1/(rrf_k+i+1), z-score normalized to
+        match the signal scale. The base alone preserves RRF order, so only the boosts reorder it.
         """
         query_lower = query.lower()
         candidate_count = len(fused)
         base_scores = np.array([1.0 / (self.rrf_k + i + 1) for i in range(candidate_count)], dtype=float)
         base_z = (base_scores - base_scores.mean()) / (base_scores.std() + 1e-8)
         score: Dict[str, float] = {tid: float(base_z[i]) for i, tid in enumerate(fused)}
-        # 켜진(weight>0) 신호만 가중 가점 누적
+        # Accumulate weighted boosts for enabled (weight > 0) signals only
         for signal_name, weight in self.rerank_weights.items():
             if weight <= 0:
                 continue
             for tid, boost in self._signal_boosts(signal_name, query_lower, fused).items():
                 score[tid] += weight * boost
-        # 점수 내림차순(동점은 stable sort로 원래 RRF 순서 유지)
+        # Sort by score descending (stable sort keeps RRF order on ties)
         return sorted(fused, key=lambda tid: score[tid], reverse=True)
 
     def get_channel_rankings(self, query: str, anchor_track_id: Optional[str] = None,
                              positive_track_ids: Optional[List[str]] = None,
                              exclude_ids: Optional[List[str]] = None,
                              turn_number: Optional[int] = None):
-        """RRF 융합 직전의 두 채널 후보 리스트 (dense_ranked, bm25_ranked)를 반환.
+        """Return the two channel candidate lists (dense_ranked, bm25_ranked) right before RRF.
 
-        rrf_k 스윕용: 비싼 dense 인코딩+BM25 검색을 turn당 1회만 하고, rrf_k만 바꿔
-        재융합(_rrf_fuse)하기 위함. rrf_k는 융합 상수일 뿐 후보 추출엔 영향이 없다.
+        Used for rrf_k sweeps: run the expensive dense encoding + BM25 search once per turn and
+        re-fuse (_rrf_fuse) with different rrf_k values. rrf_k does not affect candidate extraction.
 
-        주의: 아래 본문은 text_to_item_retrieval의 RRF 직전(query 인코딩~bm25_ranked)과
-        '글자 그대로 동일'해야 한다. 그래야 _rrf_fuse(..., rrf_k=60) 재융합 시 0.1468이
-        재현된다. text_to_item_retrieval 수정 시 이 메서드도 반드시 동기화할 것.
+        NOTE: the body must stay identical to text_to_item_retrieval up to the RRF step, so that
+        re-fusing with rrf_k=60 reproduces 0.1468. Keep both in sync when editing either.
         """
-        # ↓↓↓ text_to_item_retrieval 본문(RRF 직전까지)과 동일 ↓↓↓
         query_vec = self._encode(query, is_query=True)
         exclude = set(exclude_ids or [])
 
-        # anchor 벡터 블렌딩 (같은 BGE 공간)
+        # Anchor vector blending (same BGE space)
         alpha = self._alpha(turn_number)
         if alpha > 0 and anchor_track_id is not None:
             anchor_vec = self._encode_anchor(anchor_track_id)
@@ -562,32 +560,31 @@ class ANCHOR_BGE_BM25_CF_MODEL:
 
         bge_score = self.track_embs @ query_vec   # [N]
 
-        # cf-bpr 채널 (score-level z-score 융합)
+        # cf-bpr channel (score-level z-score fusion)
         cf_q = self._cf_query(positive_track_ids) if self.beta > 0 else None
         if cf_q is not None:
             cf_raw = self.cf_embs @ cf_q          # [M]
             aligned = torch.full((len(self.track_ids),), float("nan"), device=self.device)
             aligned[self.valid_cf] = cf_raw[self.cf_pos[self.valid_cf]]
             nan_mask = torch.isnan(aligned)
-            aligned[nan_mask] = aligned[~nan_mask].mean()   # cf 없는 후보는 평균 대체
+            aligned[nan_mask] = aligned[~nan_mask].mean()   # tracks without cf get the mean
             final = (1 - self.beta) * self._zscore(bge_score) + self.beta * self._zscore(aligned)
         else:
             final = bge_score
 
-        # 과거 추천 + anchor 제외 (dense score에서 -1e9로 침몰)
+        # Exclude past recommendations + anchor (sink to -1e9 in dense score)
         for eid in exclude:
             idx = self.track_id_to_idx.get(eid)
             if idx is not None:
                 final[idx] = -1e9
 
-        # dense(best=BGE+anchor+cf) 후보 풀: 점수 상위 dense_pool개를 순위대로
+        # Dense (BGE+anchor+cf) candidate pool: top dense_pool tracks by score
         dense_n = min(self.dense_pool, final.shape[0])
         dense_indices = torch.topk(final, dense_n).indices.cpu().tolist()
         dense_ranked = [self.track_ids[i] for i in dense_indices if self.track_ids[i] not in exclude]
 
-        # BM25(sparse) 후보 풀: 동일 누적쿼리로 lexical 검색 후 exclude 제거
+        # BM25 (sparse) candidate pool: lexical search on the same query, minus excluded tracks
         bm25_ranked = [t for t in self.bm25.text_to_item_retrieval(query, self.bm25_topk) if t not in exclude]
-        # ↑↑↑ 여기까지 text_to_item_retrieval과 동일 ↑↑↑
         return dense_ranked, bm25_ranked
 
     def batch_text_to_item_retrieval(self, queries: List[str], topk: int, user_ids: List = None,

@@ -84,7 +84,7 @@ class BGE_MODEL:
         """
         metadata_dataset = load_dataset(self.dataset_name)
         metadata_concat_dataset = concatenate_datasets([metadata_dataset[split_type] for split_type in self.split_types])
-        metadata_dict = {item["track_id"]: item for item in metadata_concat_dataset} # track_id을 키로, 전체 메타데이터 딕셔너리를 값으로 하는 딕셔너리 생성
+        metadata_dict = {item["track_id"]: item for item in metadata_concat_dataset} # track_id -> full metadata row
         return metadata_dict
 
     def _stringify_metadata(self, metadata: Dict[str, object]) -> str:
@@ -109,7 +109,7 @@ class BGE_MODEL:
 
     def build_index(self) -> None:
         """Build and persist an embedding index over the loaded corpus."""
-        track_ids = list(self.metadata_dict.keys()) # 모든 트랙을 텍스트 문자열로 변환, corpus+texts는 100만개의 문자열 리스트
+        track_ids = list(self.metadata_dict.keys()) # convert every track to a text string for the corpus
         corpus_texts = []
         for track_id in track_ids:
             metadata = self.metadata_dict[track_id]

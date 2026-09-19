@@ -16,5 +16,5 @@ corpus_types:
 cache_dir: "./cache"
 device: "cuda"
 attn_implementation: "sdpa"
-# anchor_cf 전용: blindset은 goal_progress_assessment 라벨이 없으므로 false(과거 모든 music을 positive로 사용).
+# anchor_cf only: blindset has no goal_progress_assessment labels, so false (all past music tracks are positives).
 anchor_feedback: false

@@ -430,15 +430,15 @@ class OPENAI_MODEL:
     def response_generation(self, sys_prompt, chat_history, recommend_item, max_new_tokens=None, response_format=None):
         messages = self._build_messages(sys_prompt, chat_history, recommend_item)
         completion = self.client.chat.completions.create(
-            model=self.model_name,                          # "gpt-5.4"
+            model=self.model_name,
             messages=messages,
-            max_completion_tokens=512,                      # max_tokens 아님! reasoning 토큰 포함이라 넉넉히
-            reasoning_effort="none",                        # 응답생성엔 reasoning 불필요 (none 또는 low)
-            # frequency_penalty: 이미 등장한 토큰을 빈도에 비례해 down-weight → 반복 단어 억제 → LexDiv↑.
-            # 그동안 생성자에서 받기만 하고 호출엔 안 넣어 무시됐던 값을 실제로 전달한다 (config로 제어).
+            max_completion_tokens=512,                      # not max_tokens; includes reasoning tokens, so keep it generous
+            reasoning_effort="none",                        # response generation needs no reasoning (none or low)
+            # frequency_penalty down-weights tokens in proportion to how often they appeared,
+            # suppressing repeated words and raising lexical diversity (controlled via config).
             frequency_penalty=self.frequency_penalty,
             presence_penalty=self.presence_penalty,
-            # temperature는 계속 미전달 (penalty 쪽이 품질을 덜 해쳐 우선).
+            # temperature is intentionally not passed (penalties hurt quality less).
         )
         return completion.choices[0].message.content
 
